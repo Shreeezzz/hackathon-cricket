@@ -198,6 +198,30 @@
   .linkbox{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;}
   .linkbox input{flex:1;min-width:230px;font-family:monospace;font-size:.8rem;}
   @media(max-width:600px){
+    body{overflow-x:hidden;}
+    .wrap{padding:12px 10px 44px;}
+    header h1{font-size:1.45rem;line-height:1.2;}
+    header p{font-size:.78rem;}
+    .tabs,.vtabs{gap:5px;}
+    .tab,.vtab{padding:8px 11px;font-size:.78rem;min-height:42px;}
+    .card{padding:14px 12px;border-radius:12px;}
+    .row{gap:8px;align-items:stretch;}
+    .row label{flex:1 1 100%;justify-content:space-between;flex-wrap:wrap;}
+    .row select,.row input[type=text],.row input[type=number],.row input[type=datetime-local]{flex:1;min-width:0;}
+    button{min-height:42px;padding:8px 12px;}
+    .btn-row{gap:7px;}
+    .fix{align-items:flex-start;flex-direction:column;}
+    .fix>.row{width:100%;justify-content:flex-start!important;}
+    .scoreboard{padding:14px 12px;}
+    .sb-top{align-items:flex-start;flex-direction:column;}
+    .sb-meta{text-align:left;width:100%;}
+    .sb-score{font-size:2.15rem;}
+    .result-banner{font-size:.95rem;padding:12px;}
+    .v-hero{padding:16px 14px;}
+    .v-score{font-size:2.65rem;}
+    .viewer-announcement{padding:12px 14px;}
+    #liveTables,#genericLiveTable,#fullScorecard,.lead{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    #liveTables table,#genericLiveTable table,#fullScorecard table,.lead table{min-width:600px;}
     #resultsTable table{display:block;margin-top:8px;}
     #resultsTable table tr:first-child{display:none;}
     #resultsTable table tr{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;
@@ -932,7 +956,7 @@ function buildSnapshot(){
       striker:s?{n:s.name,r:s.runs,b:s.balls}:null,
       nonStriker:ns?{n:ns.name,r:ns.runs,b:ns.balls}:null,
       bowler:bo?{n:bo.name,r:bo.runs,w:bo.wickets,b:bo.balls}:null,
-      over:i.overEvents.slice(-8),
+      over:(i.overEvents||[]).slice(-8),
       topBat:i.batting.filter(function(b){return b.batted;})
         .sort(function(a,b){return b.runs-a.runs;}).slice(0,3)
         .map(function(b){return {n:b.name,r:b.runs,b:b.balls};}),
@@ -1947,7 +1971,18 @@ function startMatch(side){
   $('breakCard').style.display='none';$('confirmCard').style.display='none';
   showOpeners();render();
 }
-function inn(){return match.innings[match.current];}
+function inn(){
+  var i=match.innings[match.current];
+  if(i){
+    if(!Array.isArray(i.overEvents))i.overEvents=[];
+    if(!Array.isArray(i.fow))i.fow=[];
+    if(!i.extras)i.extras={wide:0,nb:0,bye:0};
+    if(typeof i.wideStreak!=='number')i.wideStreak=0;
+    if(typeof i.wideCount!=='number')i.wideCount=0;
+    (i.bowling||[]).forEach(function(b){if(typeof b.oversDone!=='number')b.oversDone=Math.floor((b.balls||0)/6);});
+  }
+  return i;
+}
 function maxBalls(){return overs*6;}
 function oversStr(b){return Math.floor(b/6)+'.'+(b%6);}
 function rr(r,b){return b?(r/(b/6)).toFixed(2):'0.00';}
@@ -2922,7 +2957,7 @@ function liveHTML(){
     if(need>0&&left>0)chase='<div class="chase">NEED '+need+' FROM '+left+' BALLS \u00b7 RRR '+(need/(left/6)).toFixed(2)+'</div>';
     else if(match.over)chase='<div class="chase">'+match.result+'</div>';
   }
-  var tl=i.overEvents.map(function(e){return '<span class="b '+e.cls+'">'+e.label+'</span>';}).join('');
+  var tl=(i.overEvents||[]).map(function(e){return '<span class="b '+e.cls+'">'+e.label+'</span>';}).join('');
   var bl=i.batting.filter(function(b){return b.batted;}).sort(function(a,b){return b.runs-a.runs;}).slice(0,3);
   var wl=i.bowling.filter(function(b){return b.balls>0;}).sort(function(a,b){return b.wickets-a.wickets||a.runs-b.runs;}).slice(0,3);
   return '<div class="teamline">'+i.battingName+' &nbsp;<span style="opacity:.6">v</span>&nbsp; '+i.bowlingName+'</div>'+
