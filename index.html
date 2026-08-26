@@ -1091,7 +1091,8 @@ function redrawScorerUI(){
     $('matchArea').style.display='block';
     hidePrompts();
     $('breakCard').style.display='none';
-    $('scoringCard').style.display=(inn()&&!inn().done)?'block':'none';
+    $('scoringCard').style.display=(inn()&&inn().started&&!inn().done)?'block':'none';
+    if(inn()&&!inn().started&&!inn().done)showOpeners();
     if(match.over)renderScorecard();
     render();
     targetTab='live';
@@ -1928,7 +1929,8 @@ function openToss(i){
     $('matchArea').style.display='block';
     hidePrompts();
     $('breakCard').style.display='none';
-    $('scoringCard').style.display=(inn()&&!inn().done)?'block':'none';
+    $('scoringCard').style.display=(inn()&&inn().started&&!inn().done)?'block':'none';
+    if(inn()&&!inn().started&&!inn().done)showOpeners();
     goTo('live');
     render();
     return;
