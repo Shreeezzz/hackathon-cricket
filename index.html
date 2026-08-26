@@ -197,6 +197,20 @@
   .setup-box ol{margin:8px 0 0;padding-left:20px;font-size:.86rem;line-height:1.8;}
   .linkbox{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;}
   .linkbox input{flex:1;min-width:230px;font-family:monospace;font-size:.8rem;}
+  @media(max-width:600px){
+    #resultsTable table{display:block;margin-top:8px;}
+    #resultsTable table tr:first-child{display:none;}
+    #resultsTable table tr{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;
+      margin:8px 0;padding:10px;border:1px solid #e3e8e4;border-radius:10px;background:#fbfdfb;}
+    #resultsTable table td{border:0;padding:2px 0;font-size:.82rem;}
+    #resultsTable table td:first-child{grid-column:1/-1;font-size:.9rem;color:var(--green-dark);}
+    #resultsTable table td:nth-child(2)::before{content:'Team A: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(3)::before{content:'Team B: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(4){grid-column:1/-1;}
+    #resultsTable table td:nth-child(4)::before{content:'Winner: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(5)::before{content:'Margin: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(6)::before{content:'Player of the Match: ';font-weight:700;color:#666;}
+  }
 </style>
 </head>
 <body>
@@ -778,7 +792,7 @@ window.onerror=function(msg,src,line){
 'use strict';
 
 var teams=[],fixtures=[],overs=6,maxSpell=2,rotMode='alternate',fixtureSeq=0;
-var match=null,matchesByFixture={},undoStack=[],activeFixture=-1,pendingConfirm=null,liveWin=null;
+var match=null,matchesByFixture={},undoStack=[],activeFixture=-1,pendingConfirm=null,liveWin=null,viewerAnnouncement='';
 var so=null;
 function $(id){return document.getElementById(id);}
 function clone(obj){
@@ -873,7 +887,7 @@ function flushPublishNow(){
 
 function buildSnapshot(){
   syncCurrentMatch();
-  var snap={ updated:Date.now(), overs:overs, code:MATCH_CODE,
+  var snap={ updated:Date.now(), overs:overs, code:MATCH_CODE,announcement:viewerAnnouncement,
     teams:teams.map(function(t){return t.name;}),
     teamDetails:teams.map(function(t){
       return {name:t.name,players:t.players.map(function(p){
@@ -896,6 +910,7 @@ function buildSnapshot(){
       overs:overs,
       maxSpell:maxSpell,
       rotMode:rotMode,
+      viewerAnnouncement:viewerAnnouncement,
       match:clone(match),
       matchesByFixture:clone(matchesByFixture),
       superOverState:clone(so),
@@ -987,6 +1002,9 @@ function applyState(state){
   overs=(typeof state.overs==='number'&&isFinite(state.overs)&&state.overs>0)?Math.floor(state.overs):overs;
   maxSpell=(typeof state.maxSpell==='number'&&isFinite(state.maxSpell)&&state.maxSpell>0)?Math.floor(state.maxSpell):maxSpell;
   rotMode=(state.rotMode==='manual'||state.rotMode==='alternate'||state.rotMode==='cycle')?state.rotMode:'alternate';
+  viewerAnnouncement=String(state.viewerAnnouncement||'');
+  if($('viewerAnnouncementInput'))$('viewerAnnouncementInput').value=viewerAnnouncement;
+  renderViewerAnnouncement(viewerAnnouncement);
   matchesByFixture=state.matchesByFixture?clone(state.matchesByFixture):{};
   match=state.match?clone(state.match):null;
   if(match&&!match.over&&match.fixture>=0&&fixtures[match.fixture]){
@@ -1112,19 +1130,25 @@ function renderViewerAnnouncement(message){
 function setupViewerAnnouncement(){
   var input=$('viewerAnnouncementInput');
   if(!input)return;
+  if(IS_VIEWER)return;
   var saved='';
-  try{saved=localStorage.getItem('cricketViewerAnnouncement')||'';}catch(e){}
+  try{saved=localStorage.getItem('cricketViewerAnnouncement')||viewerAnnouncement||'';}catch(e){saved=viewerAnnouncement||'';}
+  viewerAnnouncement=saved;
   input.value=saved;
   renderViewerAnnouncement(saved);
   $('showAnnouncementBtn').addEventListener('click',function(){
     var text=input.value.trim();
     try{localStorage.setItem('cricketViewerAnnouncement',text);}catch(e){}
+    viewerAnnouncement=text;
     renderViewerAnnouncement(text);
+    publish();
   });
   $('clearAnnouncementBtn').addEventListener('click',function(){
     input.value='';
     try{localStorage.removeItem('cricketViewerAnnouncement');}catch(e){}
+    viewerAnnouncement='';
     renderViewerAnnouncement('');
+    publish();
   });
 }
 function startViewer(){
@@ -1203,6 +1227,7 @@ function formatFixtureTime(value){
   return isNaN(d.getTime())?value:d.toLocaleString([], {dateStyle:'medium',timeStyle:'short'});
 }
 function vRender(){
+  renderViewerAnnouncement(vData&&vData.announcement);
   if(vTab==='live')vRenderLive();
   else if(vTab==='all')vRenderAll();
   else vRenderTeams();
@@ -1801,8 +1826,10 @@ function renderFixtures(){
           '<option value="">Select winner</option><option value="a"'+(f.winner===teams[f.a].name?' selected':'')+'>'+teams[f.a].name+'</option>'+ 
           '<option value="b"'+(f.winner===teams[f.b].name?' selected':'')+'>'+teams[f.b].name+'</option></select></label></div>'+ 
           '<div class="row" style="justify-content:flex-end;"><button type="button" data-edit-fix="'+gi+'" class="secondary">Edit</button>'+ 
-          '<button type="button" data-fix="'+gi+'" class="'+(f.played?'secondary':'')+'">'+
-          (isCurrentMatch?'Resume':(f.played?'Replay':'Play'))+'</button></div></div>';
+          (f.played
+            ? '<button type="button" data-view-fix="'+gi+'" class="secondary">View</button><button type="button" data-replay-fix="'+gi+'">Replay</button>'
+            : '<button type="button" data-fix="'+gi+'">'+(isCurrentMatch?'Resume':'Play')+'</button>')+
+          '</div></div>';
       }).join('')+'</div>';
   }
   var last=roundFixtures(mr);
@@ -1815,6 +1842,12 @@ function renderFixtures(){
   $('fixGrid').innerHTML=html;
   Array.prototype.forEach.call($('fixGrid').querySelectorAll('button[data-fix]'),function(b){
     b.addEventListener('click',function(){openToss(parseInt(b.dataset.fix,10));});
+  });
+  Array.prototype.forEach.call($('fixGrid').querySelectorAll('button[data-view-fix]'),function(b){
+    b.addEventListener('click',function(){viewFixture(parseInt(b.dataset.viewFix,10));});
+  });
+  Array.prototype.forEach.call($('fixGrid').querySelectorAll('button[data-replay-fix]'),function(b){
+    b.addEventListener('click',function(){confirmReplay(parseInt(b.dataset.replayFix,10));});
   });
   Array.prototype.forEach.call($('fixGrid').querySelectorAll('button[data-edit-fix]'),function(b){
     b.addEventListener('click',function(){openEditFixture(parseInt(b.dataset.editFix,10));});
@@ -1838,12 +1871,34 @@ function renderFixtures(){
 
 /* ================= TOSS ================= */
 var tossSide=null;
+function viewFixture(i){
+  var f=fixtures[i];
+  if(!f||!f.played)return;
+  syncCurrentMatch();
+  var saved=matchesByFixture[fixtureKey(f,i)];
+  match=(saved&&saved.over)?saved:{fixture:i,firstBatIdx:f.a,firstBowlIdx:f.b,
+    innings:clone(f.innings||[]),current:Math.max(0,(f.innings||[]).length-1),result:f.result||'',over:true};
+  activeFixture=i;
+  $('tossCard').style.display='none';$('matchArea').style.display='block';
+  hidePrompts();$('breakCard').style.display='none';$('scoringCard').style.display='none';
+  goTo('live');render();
+}
+function confirmReplay(i){
+  var f=fixtures[i];
+  if(!f)return;
+  if(!window.confirm('Replay this match? This will clear its saved result and scorecard, then start again from the toss.'))return;
+  delete matchesByFixture[fixtureKey(f,i)];
+  if(match&&match.fixture===i)match=null;
+  f.played=false;f.result='';f.winner='';f.margin='';f.innings=null;f.mom=null;f.topBat=null;f.topBowl=null;f.superOver=null;
+  openToss(i);
+  publish();
+}
 function openToss(i){
   activeFixture=i;var f=fixtures[i];
   if(!f)return;
   syncCurrentMatch();
   var savedMatch=matchesByFixture[fixtureKey(f,i)];
-  if(savedMatch){
+  if(savedMatch&&!savedMatch.over){
     match=savedMatch;
     $('tossCard').style.display='none';
     $('matchArea').style.display='block';
@@ -2600,13 +2655,12 @@ $('endInningsBtn').addEventListener('click',function(){
     i.battingName+' are '+i.runs+'/'+i.wickets+' after '+oversStr(i.balls)+' overs.',endInnings);
 });
 $('abandonBtn').addEventListener('click',function(){
-  if(!match){goTo('fixtures');return;}
-  askConfirm('Leave this match?','No result will be saved for this fixture.',function(){
-    if(match.fixture>=0&&fixtures[match.fixture]){
-      delete matchesByFixture[fixtureKey(fixtures[match.fixture],match.fixture)];
-    }
-    match=null;goTo('fixtures');publish();
-  });
+  if(match)syncCurrentMatch();
+  hidePrompts();
+  $('confirmCard').style.display='none';
+  renderFixtures();
+  goTo('fixtures');
+  publish();
 });
 $('copyViewerBtn').addEventListener('click',function(){copyField('viewerLink');});
 $('copyScorerBtn').addEventListener('click',function(){copyField('scorerLink');});
@@ -2637,6 +2691,7 @@ $('applyCodeBtn').addEventListener('click',function(){
 function render(){
   if(!match)return;
   var i=inn();
+  var events=i.overEvents||[];
   var s=i.striker!=null?bat(i.striker):null;
   var ns=i.nonStriker!=null?bat(i.nonStriker):null;
   var bo=i.bowler!=null?bwl(i.bowler):null;
@@ -2644,7 +2699,9 @@ function render(){
   var nsLabel=ns?playerLabel(i.battingName,ns.id,ns.name):'';
   var boLabel=bo?playerLabel(i.bowlingName,bo.id,bo.name):'';
   var tgt='';
-  if(match.current===1){
+  if(match.over){
+    tgt='<div class="result-banner">&#127942; '+match.result+'</div>';
+  } else if(match.current===1){
     var need=match.innings[0].runs+1-i.runs,left=maxBalls()-i.balls;
     if(need>0&&left>0)tgt='<div class="sb-target">Need '+need+' run'+(need!==1?'s':'')+
       ' from '+left+' ball'+(left!==1?'s':'')+' \u00b7 RRR '+(need/(left/6)).toFixed(2)+'</div>';
@@ -2666,8 +2723,8 @@ function render(){
     '</div></div>';
   $('widePend').innerHTML=(i.wideStreak>0)
     ?'<div class="wide-pend">1 wide pending \u2014 if the next ball is also a wide, 1 run is added</div>':'';
-  $('overTimeline').innerHTML=i.overEvents.length
-    ? i.overEvents.map(function(e){return '<div class="ball '+e.cls+'">'+e.label+'</div>';}).join('')
+  $('overTimeline').innerHTML=events.length
+    ? events.map(function(e){return '<div class="ball '+e.cls+'">'+e.label+'</div>';}).join('')
     : '<span class="hint">New over</span>';
   $('liveTables').innerHTML='<h2>'+i.battingName+' \u2014 batting</h2>'+
     '<table><tr><th>Batter</th><th class="num">R</th><th class="num">B</th><th class="num">4s</th><th class="num">6s</th><th class="num">2D</th><th class="num">SR</th></tr>'+
@@ -2747,7 +2804,7 @@ function inningsTable(i,label){
     (i.extras.wide+i.extras.nb+i.extras.bye)+' (wd '+i.extras.wide+', nb '+i.extras.nb+', b '+i.extras.bye+')</td></tr>'+
   '<tr><td colspan="2"><b>Total</b></td><td class="num" colspan="6"><b>'+i.runs+'/'+i.wickets+
     ' ('+oversStr(i.balls)+' ov, RR '+rr(i.runs,i.balls)+')</b></td></tr></table>'+
-  (i.fow.length?'<p class="hint"><b>Fall of wickets:</b> '+i.fow.join(', ')+'</p>':'')+
+  ((i.fow&&i.fow.length)?'<p class="hint"><b>Fall of wickets:</b> '+i.fow.join(', ')+'</p>':'')+
   '<table><tr><th>Bowler</th><th class="num">O</th><th class="num">R</th><th class="num">W</th><th class="num">Econ</th></tr>'+
   i.bowling.filter(function(b){return b.balls>0;}).map(function(b){
     return '<tr><td>'+playerLabel(i.bowlingName,b.id,b.name)+'</td><td class="num">'+oversStr(b.balls)+'</td><td class="num">'+b.runs+
