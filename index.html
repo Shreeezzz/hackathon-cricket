@@ -259,18 +259,22 @@
     <div class="btn-row">
       <button id="showAnnouncementBtn" type="button">Show announcement</button>
       <button id="clearAnnouncementBtn" class="secondary" type="button">Clear</button>
+      <button id="toggleViewerLiveBtn" class="secondary" type="button">Hide live match</button>
     </div>
+    <div id="viewerLiveState" class="hint">Viewer live tab: Visible</div>
   </div>
 
   <!-- ============ VIEWER MODE ============ -->
   <div id="viewerRoot" style="display:none;">
     <div id="viewerAnnouncementDisplay" class="announcement-display" style="display:none;"></div>
     <div class="vtabs">
-      <button class="vtab active" id="vTabLive" type="button">&#128250; Live match</button>
+      <button class="vtab active" id="vTabOverwise" type="button">&#128202; Over-wise score</button>
+      <button class="vtab" id="vTabLive" type="button">&#128250; Live match</button>
       <button class="vtab" id="vTabAll" type="button">&#127942; All matches</button>
       <button class="vtab" id="vTabTeams" type="button">&#128101; Teams</button>
     </div>
-    <div id="vLive"></div>
+    <div id="vOverwise"></div>
+    <div id="vLive" style="display:none;"></div>
     <div id="vAll" style="display:none;"></div>
     <div id="vTeams" style="display:none;"></div>
   </div>
@@ -283,6 +287,7 @@
     <button class="tab" data-view="live" id="tabLive" disabled>3. Live Match</button>
     <button class="tab" data-view="livescores" id="tabLiveScores">4. Generic Match</button>
     <button class="tab" data-view="results" id="tabRes" disabled>5. Results</button>
+    <button class="tab" data-view="overscores">6. Over-wise Scores</button>
     <button class="tab" data-view="share">&#128225; Share</button>
     <button class="tab" data-view="rules">&#128203; Rules</button>
   </div>
@@ -468,10 +473,11 @@
 
       <div class="prompt-panel" id="editTotalCard" style="display:none;">
         <h3>Edit total score</h3>
-        <p class="hint">Use this for a quick correction to the innings total and wicket count.</p>
+        <p class="hint">Use this for a quick correction to innings runs, wickets, and overs (example: 3.2).</p>
         <div class="row">
           <label>Total runs: <input type="number" id="editTotalRuns" min="0" step="1"></label>
           <label>Wickets: <input type="number" id="editTotalWickets" min="0" step="1"></label>
+          <label>Overs: <input type="text" id="editTotalOvers" inputmode="decimal" placeholder="0.0" style="width:72px;"></label>
           <button id="saveTotalBtn" type="button">Save total</button>
           <button class="secondary" id="cancelTotalBtn" type="button">Cancel</button>
         </div>
@@ -537,6 +543,26 @@
       <p class="hint">Players are shown as Team Name Player 1, Player 2, etc., so you can score even when exact names are unknown.</p>
       <div id="genericUmpire" class="hint"></div>
       <div id="genericLiveTable"></div>
+    </div>
+  </div>
+
+  <div id="view-overscores" style="display:none;">
+    <div class="card">
+      <h2 id="overScoreTitle">Over-wise team scores</h2>
+      <p class="hint">Use this for quick manual scoring when you only want to record each team's runs and wickets per over.</p>
+      <div class="row">
+        <label id="overScoreInningsWrap" style="display:none;">Innings: <select id="overScoreInnings"><option value="1">1st</option><option value="2">2nd</option></select></label>
+        <label>Batting team: <select id="overScoreTeam"></select></label>
+        <label>Opponent: <select id="overScoreOpponent"></select></label>
+        <label>Over: <input type="number" id="overScoreOver" min="1" max="20" value="1" style="width:72px;"></label>
+        <label>Runs: <input type="number" id="overScoreRuns" min="0" value="0" style="width:72px;"></label>
+        <label>Wickets: <input type="number" id="overScoreWickets" min="0" value="0" style="width:72px;"></label>
+        <button id="addOverScoreBtn" type="button">Add over score</button>
+        <button id="finalizeOverScoreBtn" class="gold" type="button" style="display:none;">Finalize result</button>
+      </div>
+      <div id="overScoreMsg"></div>
+      <div id="overScoreSummary" class="hint" style="margin-top:8px;"></div>
+      <div id="overScoreTable" style="margin-top:14px;"></div>
     </div>
   </div>
 
@@ -815,8 +841,9 @@ window.onerror=function(msg,src,line){
 (function(){
 'use strict';
 
-var teams=[],fixtures=[],overs=6,maxSpell=2,rotMode='alternate',fixtureSeq=0;
+var teams=[],fixtures=[],overs=6,maxSpell=2,rotMode='alternate',fixtureSeq=0,overWiseScores=[],overWiseFixture=-1;
 var match=null,matchesByFixture={},undoStack=[],activeFixture=-1,pendingConfirm=null,liveWin=null,viewerAnnouncement='';
+var viewerLiveEnabled=true;
 var so=null;
 function $(id){return document.getElementById(id);}
 function clone(obj){
@@ -911,7 +938,7 @@ function flushPublishNow(){
 
 function buildSnapshot(){
   syncCurrentMatch();
-  var snap={ updated:Date.now(), overs:overs, code:MATCH_CODE,announcement:viewerAnnouncement,
+  var snap={ updated:Date.now(), overs:overs, code:MATCH_CODE,announcement:viewerAnnouncement,liveVisible:viewerLiveEnabled,
     teams:teams.map(function(t){return t.name;}),
     teamDetails:teams.map(function(t){
       return {name:t.name,players:t.players.map(function(p){
@@ -935,6 +962,8 @@ function buildSnapshot(){
       maxSpell:maxSpell,
       rotMode:rotMode,
       viewerAnnouncement:viewerAnnouncement,
+      viewerLiveEnabled:viewerLiveEnabled,
+      overWiseScores:clone(overWiseScores),
       match:clone(match),
       matchesByFixture:clone(matchesByFixture),
       superOverState:clone(so),
@@ -1011,6 +1040,7 @@ function restoreFallbackFromSnapshot(data){
   overs=(typeof data.overs==='number'&&isFinite(data.overs)&&data.overs>0)?Math.floor(data.overs):overs;
   maxSpell=Math.max(1,maxSpell);
   rotMode='alternate';
+  viewerLiveEnabled=(data&&data.liveVisible!==false);
   match=null;matchesByFixture={};so=null;activeFixture=-1;undoStack=[];
   return true;
 }
@@ -1027,8 +1057,11 @@ function applyState(state){
   maxSpell=(typeof state.maxSpell==='number'&&isFinite(state.maxSpell)&&state.maxSpell>0)?Math.floor(state.maxSpell):maxSpell;
   rotMode=(state.rotMode==='manual'||state.rotMode==='alternate'||state.rotMode==='cycle')?state.rotMode:'alternate';
   viewerAnnouncement=String(state.viewerAnnouncement||'');
+  viewerLiveEnabled=(state.viewerLiveEnabled!==false);
+  overWiseScores=Array.isArray(state.overWiseScores)?clone(state.overWiseScores):[];
   if($('viewerAnnouncementInput'))$('viewerAnnouncementInput').value=viewerAnnouncement;
   renderViewerAnnouncement(viewerAnnouncement);
+  renderViewerLiveToggle();
   matchesByFixture=state.matchesByFixture?clone(state.matchesByFixture):{};
   match=state.match?clone(state.match):null;
   if(match&&!match.over&&match.fixture>=0&&fixtures[match.fixture]){
@@ -1144,13 +1177,21 @@ function restoreStateFromBackend(){
 }
 
 /* ================= VIEWER MODE ================= */
-var vData=null,vTab='live',vES=null;
+var vData=null,vTab='overwise',vES=null;
 function renderViewerAnnouncement(message){
   var display=$('viewerAnnouncementDisplay');
   if(!display)return;
   var text=String(message||'').trim();
   display.textContent=text;
   display.style.display=text?'block':'none';
+}
+function renderViewerLiveToggle(){
+  var btn=$('toggleViewerLiveBtn'),state=$('viewerLiveState');
+  if(btn){
+    btn.textContent=viewerLiveEnabled?'Hide live match':'Show live match';
+    btn.className=viewerLiveEnabled?'secondary':'gold';
+  }
+  if(state)state.innerHTML='Viewer live tab: <b>'+(viewerLiveEnabled?'Visible':'Hidden')+'</b>';
 }
 function setupViewerAnnouncement(){
   var input=$('viewerAnnouncementInput');
@@ -1161,6 +1202,7 @@ function setupViewerAnnouncement(){
   viewerAnnouncement=saved;
   input.value=saved;
   renderViewerAnnouncement(saved);
+  renderViewerLiveToggle();
   $('showAnnouncementBtn').addEventListener('click',function(){
     var text=input.value.trim();
     try{localStorage.setItem('cricketViewerAnnouncement',text);}catch(e){}
@@ -1175,27 +1217,44 @@ function setupViewerAnnouncement(){
     renderViewerAnnouncement('');
     publish();
   });
+  var tbtn=$('toggleViewerLiveBtn');
+  if(tbtn&&!tbtn.dataset.bound){
+    tbtn.dataset.bound='1';
+    tbtn.addEventListener('click',function(){
+      viewerLiveEnabled=!viewerLiveEnabled;
+      renderViewerLiveToggle();
+      publish();
+    });
+  }
 }
 function startViewer(){
   $('scorerRoot').style.display='none';
   $('viewerRoot').style.display='block';
   $('viewerAnnouncementInput').closest('.viewer-announcement').style.display='none';
   setupViewerAnnouncement();
+  $('vTabOverwise').addEventListener('click',function(){vTab='overwise';vSwitch();});
   $('vTabLive').addEventListener('click',function(){vTab='live';vSwitch();});
   $('vTabAll').addEventListener('click',function(){vTab='all';vSwitch();});
   $('vTabTeams').addEventListener('click',function(){vTab='teams';vSwitch();});
+  vSwitch();
   if(!SYNC_ON){
-    $('vLive').innerHTML='<div class="v-none"><h3>Live sharing is not set up</h3>'+
+    var noSyncMsg='<div class="v-none"><h3>Live sharing is not set up</h3>'+
       '<p>This copy of the app has no database link configured, so there is nothing to watch yet.</p></div>';
+    $('vOverwise').innerHTML=noSyncMsg;
+    $('vLive').innerHTML=noSyncMsg;
+    $('vAll').innerHTML=noSyncMsg;
+    $('vTeams').innerHTML=noSyncMsg;
     return;
   }
   vRender();
   connectStream();
 }
 function vSwitch(){
+  $('vTabOverwise').className='vtab'+(vTab==='overwise'?' active':'');
   $('vTabLive').className='vtab'+(vTab==='live'?' active':'');
   $('vTabAll').className='vtab'+(vTab==='all'?' active':'');
   $('vTabTeams').className='vtab'+(vTab==='teams'?' active':'');
+  $('vOverwise').style.display=(vTab==='overwise')?'block':'none';
   $('vLive').style.display=(vTab==='live')?'block':'none';
   $('vAll').style.display=(vTab==='all')?'block':'none';
   $('vTeams').style.display=(vTab==='teams')?'block':'none';
@@ -1253,9 +1312,130 @@ function formatFixtureTime(value){
 }
 function vRender(){
   renderViewerAnnouncement(vData&&vData.announcement);
-  if(vTab==='live')vRenderLive();
+  if(vTab==='overwise')vRenderOverwise();
+  else if(vTab==='live')vRenderLive();
   else if(vTab==='all')vRenderAll();
   else vRenderTeams();
+}
+function vRenderOverwise(){
+  var el=$('vOverwise'); if(!el)return;
+  if(!vData){
+    el.innerHTML='<div class="v-none"><h3>Waiting for the scorer…</h3>'+
+      '<p>Over-wise scores will appear here as they are added.</p></div>';
+    return;
+  }
+  var scores=[];
+  if(vData.state&&Array.isArray(vData.state.overWiseScores))scores=vData.state.overWiseScores;
+  else if(Array.isArray(vData.overWiseScores))scores=vData.overWiseScores;
+  var fx=vData.fixtures||[],teamNames=vData.teams||[],maxOv=Number(vData.overs)||6;
+  var liveFix=(vData.live&&typeof vData.live.fixture==='number')?vData.live.fixture:-1;
+  var grouped={};
+  scores.forEach(function(x,idx){
+    var fi=(typeof x.fixture==='number'&&x.fixture>=0)?x.fixture:-1;
+    if(fi<0)return;
+    var f=fx[fi];
+    if(!f)return;
+    var teamA=teamNames[f.a]||'',teamB=teamNames[f.b]||'';
+    var team=String(x.team||''),opp=String(x.opponent||'');
+    var innings=Number(x.innings);
+    if(innings!==1&&innings!==2){
+      if(team===teamA&&opp===teamB)innings=1;
+      else if(team===teamB&&opp===teamA)innings=2;
+    }
+    if(!grouped[fi])grouped[fi]={
+      fixture:fi,
+      teamA:teamA,
+      teamB:teamB,
+      umpire:f.umpire||'Not assigned',
+      rows:[],
+      in1:null,
+      in2:null
+    };
+    var row={
+      idx:idx,
+      innings:innings,
+      team:team,
+      over:Number(x.over)||0,
+      runs:Number(x.runs)||0,
+      wickets:Number(x.wickets)||0
+    };
+    grouped[fi].rows.push(row);
+    if(innings===1&&(!grouped[fi].in1||row.over>grouped[fi].in1.over||(row.over===grouped[fi].in1.over&&row.idx>grouped[fi].in1.idx)))grouped[fi].in1=row;
+    if(innings===2&&(!grouped[fi].in2||row.over>grouped[fi].in2.over||(row.over===grouped[fi].in2.over&&row.idx>grouped[fi].in2.idx)))grouped[fi].in2=row;
+  });
+
+  if(liveFix>=0&&fx[liveFix]&&!grouped[liveFix]){
+    grouped[liveFix]={
+      fixture:liveFix,
+      teamA:teamNames[fx[liveFix].a]||'',
+      teamB:teamNames[fx[liveFix].b]||'',
+      umpire:fx[liveFix].umpire||'Not assigned',
+      rows:[],
+      in1:null,
+      in2:null
+    };
+  }
+
+  var order=Object.keys(grouped).map(function(k){return parseInt(k,10);}).sort(function(a,b){return a-b;});
+  if(liveFix>=0&&order.indexOf(liveFix)>=0){
+    order=order.filter(function(x){return x!==liveFix;});
+    order.unshift(liveFix);
+  }
+  if(!order.length){
+    var last=null;
+    fx.forEach(function(f){if(f&&f.played)last=f;});
+    el.innerHTML='<div class="v-none"><h3>No match in progress</h3>'+
+      (last?'<p>Last result: <b>'+(last.result||'').replace(' (manual selection)','')+'</b></p>':'<p>The tournament has not started yet.</p>')+
+      '<p class="hint">Tap <b>All matches</b> above to see the full fixtures.</p>'+
+      '</div>';
+    return;
+  }
+
+  var cards=order.map(function(fi){
+    var g=grouped[fi];
+    g.rows.sort(function(a,b){return a.idx-b.idx;});
+    var isLive=(fi===liveFix&&vData.live);
+    var latest=g.in2||g.in1||g.rows[g.rows.length-1]||null;
+    var chase='';
+    if(isLive){
+      var L=vData.live;
+      if(L.target){
+        var needLive=L.target-L.runs,leftLive=(maxOv*6)-L.balls;
+        if(needLive>0&&leftLive>0)chase='<div class="v-chase">Need '+needLive+' from '+leftLive+' ball'+(leftLive!==1?'s':'')+' · RRR '+(needLive/(leftLive/6)).toFixed(2)+'</div>';
+        else if(needLive<=0)chase='<div class="v-chase">'+L.batting+' has chased the target.</div>';
+      }
+      latest={
+        team:L.batting||g.teamA,
+        runs:Number(L.runs)||0,
+        wickets:Number(L.wickets)||0,
+        over:ovStr(Number(L.balls)||0)
+      };
+    } else if(g.in1&&g.in2){
+      var target=g.in1.runs+1;
+      var need=target-g.in2.runs;
+      var left=Math.max(0,(maxOv-Math.min(maxOv,g.in2.over))*6);
+      if(g.in2.runs>=target){
+        chase='<div class="v-chase">'+g.teamB+' won by '+Math.max(0,5-g.in2.wickets)+' wicket'+(Math.max(0,5-g.in2.wickets)!==1?'s':'')+' (over-wise)</div>';
+      } else if(g.in2.over>=maxOv||g.in2.wickets>=5){
+        if(g.in2.runs===g.in1.runs)chase='<div class="v-chase">Match tied in over-wise scoring</div>';
+        else chase='<div class="v-chase">'+g.teamA+' won by '+(g.in1.runs-g.in2.runs)+' run'+((g.in1.runs-g.in2.runs)!==1?'s':'')+' (over-wise)</div>';
+      } else {
+        chase='<div class="v-chase">Need '+need+' from '+left+' ball'+(left!==1?'s':'')+' · RRR '+(left?((need/(left/6)).toFixed(2)):'-')+'</div>';
+      }
+    } else if(g.in1){
+      chase='<div class="v-chase">Target for '+g.teamB+': '+(g.in1.runs+1)+'</div>';
+    }
+    return '<div class="v-hero">'+
+      '<div class="v-live"><span class="blip"></span>'+(isLive?'LIVE OVER-WISE':'OVER-WISE')+'</div>'+
+      '<div class="v-teams">Match '+(g.fixture+1)+' · '+g.teamA+' &nbsp;<span style="opacity:.55">v</span>&nbsp; '+g.teamB+'</div>'+
+      '<div class="hint" style="color:#fff;opacity:.9;">&#9876; Umpire: '+g.umpire+'</div>'+
+      '<div class="v-score">'+(latest?latest.runs:0)+'<span style="font-size:.4em">/'+(latest?latest.wickets:0)+'</span>'+
+      '<span>'+latest.team+' · Over '+latest.over+'</span></div>'+chase+
+      '<div class="v-rosters">'+vRosterHTML(g.teamA)+vRosterHTML(g.teamB)+'</div>'+
+      '</div>';
+  }).join('');
+
+  el.innerHTML=cards;
 }
 function vRenderTeams(){
   var el=$('vTeams'); if(!el)return;
@@ -1287,6 +1467,11 @@ function vRosterHTML(teamName){
 }
 function vRenderLive(){
   var el=$('vLive'); if(!el)return;
+  if(vData&&vData.liveVisible===false){
+    el.innerHTML='<div class="v-none"><h3>No match in progress</h3>'+
+      '<p>The scorer has hidden live match updates for viewers.</p></div>';
+    return;
+  }
   if(!vData){
     el.innerHTML='<div class="v-none"><h3>Waiting for the scorer\u2026</h3>'+
       '<p>The live score will appear here as soon as a match starts.</p></div>';return;
@@ -1524,10 +1709,11 @@ Array.prototype.forEach.call(tabEls,function(t){
     var targetView=(t.dataset.view==='livescores')?'live':t.dataset.view;
     Array.prototype.forEach.call(tabEls,function(x){x.classList.remove('active');});
     t.classList.add('active');
-    ['setup','fixtures','live','livescores','results','share','rules'].forEach(function(v){
+    ['setup','fixtures','live','livescores','overscores','results','share','rules'].forEach(function(v){
       var el=$('view-'+v); if(el)el.style.display=(v===targetView)?'block':'none';
     });
     if(targetView==='live'&&match)render();
+    if(targetView==='overscores')renderOverWiseScores();
     if(t.dataset.view==='share')refreshShare();
   });
 });
@@ -1667,10 +1853,6 @@ $('toFixBtn').addEventListener('click',function(){
 });
 
 function openAddTeamPanel(){
-  if(fixtures.some(function(f){return f.played;})||match){
-    $('addTeamWarn').innerHTML='<div class="warnmsg">A new team cannot be added after a match has started.</div>';
-    return;
-  }
   var rows='';
   for(var n=1;n<=6;n++)rows+='<div class="row" style="margin-top:8px;"><label>Player '+n+': <input type="text" data-new-player="'+n+'" placeholder="Player '+n+' name"></label>'+
     '<label>Role: <input type="text" data-new-role="'+n+'" placeholder="Optional role"></label>'+
@@ -1697,7 +1879,14 @@ $('saveNewTeamBtn').addEventListener('click',function(){
   players.forEach(function(p,i){p.id=nextId+i;p.captain=(i+1===captain);});
   teams.push({name:name,players:players});
   $('addTeamCard').style.display='none';
+  var tournamentStarted=fixtures.some(function(f){return f.played;})||Object.keys(matchesByFixture).some(function(k){
+    return matchesByFixture[k]&&!matchesByFixture[k].over;
+  });
+  if(!tournamentStarted)buildFixtures();
   renderTeams();renderFixtures();publish();
+  if(tournamentStarted){
+    $('loadStatus').innerHTML='<div class="toast">Team added. Existing fixtures and scores were kept; the new team will be available for the next fixture setup.</div>';
+  }
 });
 var editingTeam=-1;
 function openEditTeam(i){
@@ -1798,7 +1987,7 @@ $('shuffleFixBtn').addEventListener('click',function(){fixAction(function(){
 $('resetFixBtn').addEventListener('click',function(){
   if(!window.confirm('Reset the tournament to sheet order? This clears every result, scorecard, paused match, and Super Over.'))return;
   buildFixtures();
-  match=null;matchesByFixture={};undoStack=[];activeFixture=-1;so=null;
+  match=null;matchesByFixture={};undoStack=[];activeFixture=-1;so=null;overWiseScores=[];overWiseFixture=-1;
   $('matchArea').style.display='none';$('tossCard').style.display='none';
   $('tieCard').style.display='none';$('superCard').style.display='none';
   $('lastCard').style.display='none';$('fullScorecard').innerHTML='';
@@ -1859,7 +2048,7 @@ function renderFixtures(){
           '<label class="hint" style="display:block;margin-top:6px;">Winner: <select data-winner-fix="'+gi+'">'+
           '<option value="">Select winner</option><option value="a"'+(f.winner===teams[f.a].name?' selected':'')+'>'+teams[f.a].name+'</option>'+ 
           '<option value="b"'+(f.winner===teams[f.b].name?' selected':'')+'>'+teams[f.b].name+'</option></select></label></div>'+ 
-          '<div class="row" style="justify-content:flex-end;"><button type="button" data-edit-fix="'+gi+'" class="secondary">Edit</button>'+ 
+          '<div class="row" style="justify-content:flex-end;"><button type="button" data-edit-fix="'+gi+'" class="secondary">Edit</button><button type="button" data-overwise-fix="'+gi+'" class="secondary">Over-wise score</button>'+ 
           (f.played
             ? '<button type="button" data-view-fix="'+gi+'" class="secondary">View</button><button type="button" data-replay-fix="'+gi+'">Replay</button>'
             : '<button type="button" data-fix="'+gi+'">'+(isCurrentMatch?'Resume':'Play')+'</button>')+
@@ -1879,6 +2068,9 @@ function renderFixtures(){
   });
   Array.prototype.forEach.call($('fixGrid').querySelectorAll('button[data-view-fix]'),function(b){
     b.addEventListener('click',function(){viewFixture(parseInt(b.dataset.viewFix,10));});
+  });
+  Array.prototype.forEach.call($('fixGrid').querySelectorAll('button[data-overwise-fix]'),function(b){
+    b.addEventListener('click',function(){openOverWiseScores(parseInt(b.dataset.overwiseFix,10));});
   });
   Array.prototype.forEach.call($('fixGrid').querySelectorAll('button[data-replay-fix]'),function(b){
     b.addEventListener('click',function(){confirmReplay(parseInt(b.dataset.replayFix,10));});
@@ -1996,6 +2188,18 @@ function inn(){
 }
 function maxBalls(){return overs*6;}
 function oversStr(b){return Math.floor(b/6)+'.'+(b%6);}
+function parseOversToBalls(text,maxOv){
+  var raw=String(text||'').trim();
+  if(!raw)return null;
+  if(!/^\d+(\.\d)?$/.test(raw))return null;
+  var parts=raw.split('.');
+  var ov=parseInt(parts[0],10);
+  var ball=parts.length>1?parseInt(parts[1],10):0;
+  if(isNaN(ov)||isNaN(ball)||ball<0||ball>5)return null;
+  var total=ov*6+ball;
+  if(total<0||total>(maxOv*6))return null;
+  return total;
+}
 function rr(r,b){return b?(r/(b/6)).toFixed(2):'0.00';}
 function bat(id){var a=inn().batting.filter(function(x){return x.id===id;});return a[0];}
 function bwl(id){var a=inn().bowling.filter(function(x){return x.id===id;});return a[0];}
@@ -2102,6 +2306,7 @@ function openEditTotalPanel(){
   var i=inn();
   $('editTotalRuns').value=i.runs;
   $('editTotalWickets').value=i.wickets;
+  $('editTotalOvers').value=oversStr(i.balls);
   $('editTotalWarn').innerHTML='';
   hidePrompts();$('editTotalCard').style.display='block';$('scoringCard').style.display='none';
 }
@@ -2173,17 +2378,21 @@ $('cancelScorecardBtn').addEventListener('click',function(){
 });
 $('saveTotalBtn').addEventListener('click',function(){
   var i=inn(),runs=Number($('editTotalRuns').value),wickets=Number($('editTotalWickets').value);
+  var balls=parseOversToBalls($('editTotalOvers').value,overs);
   if(!Number.isFinite(runs)||!Number.isFinite(wickets)||runs<0||wickets<0||
      Math.floor(runs)!==runs||Math.floor(wickets)!==wickets){
     $('editTotalWarn').innerHTML='<div class="warnmsg">Use whole numbers that are zero or higher.</div>';return;
+  }
+  if(balls===null){
+    $('editTotalWarn').innerHTML='<div class="warnmsg">Enter overs as O.B where B is 0 to 5, up to '+overs+'.0.</div>';return;
   }
   if(wickets>i.batting.length-1){
     $('editTotalWarn').innerHTML='<div class="warnmsg">Wickets cannot be more than '+(i.batting.length-1)+'.</div>';return;
   }
   snapshot();
-  i.runs=runs;i.wickets=wickets;
+  i.runs=runs;i.wickets=wickets;i.balls=balls;
   hidePrompts();$('scoringCard').style.display='block';render();
-  showMsg('Total score corrected to '+i.runs+'/'+i.wickets+'.');
+  showMsg('Total corrected to '+i.runs+'/'+i.wickets+' in '+oversStr(i.balls)+' overs.');
 });
 $('cancelTotalBtn').addEventListener('click',function(){
   hidePrompts();$('scoringCard').style.display='block';render();
@@ -2837,6 +3046,253 @@ function fieldingHTML(i){
     f.map(function(b){return '<tr><td>'+playerLabel(i.bowlingName,b.id,b.name)+'</td><td class="num">'+(b.catches||0)+'</td><td class="num">'+
       (b.runouts||0)+'</td><td class="num">'+(b.stumpings||0)+'</td></tr>';}).join('')+'</table>';
 }
+function syncOverWiseFixtureInputs(){
+  var f=fixtures[overWiseFixture],inningSel=$('overScoreInnings'),teamSel=$('overScoreTeam'),oppSel=$('overScoreOpponent');
+  if(!f||!inningSel||!teamSel||!oppSel)return;
+  var in2=inningSel.value==='2';
+  teamSel.value=String(in2?f.b:f.a);
+  oppSel.value=String(in2?f.a:f.b);
+}
+function overWiseSummaryForFixture(i){
+  var f=fixtures[i];
+  if(!f)return null;
+  var teamA=teams[f.a]?teams[f.a].name:'';
+  var teamB=teams[f.b]?teams[f.b].name:'';
+  var items=overWiseScores.filter(function(x){return x.fixture===i;});
+  var latest={1:null,2:null};
+  items.forEach(function(x,idx){
+    var nm=String(x.team||'').trim(),op=String(x.opponent||'').trim();
+    if(!nm||!op)return;
+    var innings=Number(x.innings);
+    if(innings!==1&&innings!==2){
+      if(nm===teamA&&op===teamB)innings=1;
+      else if(nm===teamB&&op===teamA)innings=2;
+      else return;
+    }
+    var over=Number(x.over)||0;
+    if(!latest[innings]||over>latest[innings].over||(over===latest[innings].over&&idx>latest[innings].idx)){
+      latest[innings]={innings:innings,team:nm,opponent:op,over:over,runs:Number(x.runs)||0,wickets:Number(x.wickets)||0,idx:idx};
+    }
+  });
+  var a=latest[1]||null,b=latest[2]||null;
+  var complete=!!(a&&b),tie=false,winner='',margin='',result='';
+  var decided=false,target=a?(a.runs+1):0,need=0,ballsLeft=0,chaseText='';
+  if(complete){
+    need=target-b.runs;
+    ballsLeft=Math.max(0,(overs-Math.min(overs,b.over))*6);
+    if(b.runs>=target){
+      winner=teamB;
+      margin='by '+Math.max(0,5-b.wickets)+' wicket'+(Math.max(0,5-b.wickets)!==1?'s':'');
+      result=winner+' won '+margin+' (over-wise)';
+      decided=true;
+      chaseText=winner+' chased '+target+' in '+Math.min(b.over,overs)+' over'+(Math.min(b.over,overs)!==1?'s':'')+'.';
+    } else if(b.over>=overs||b.wickets>=5){
+      if(b.runs===a.runs){
+        tie=true;
+        margin='Tie';
+        result='Match tied in over-wise scoring';
+        decided=true;
+        chaseText='Scores level after second innings.';
+      } else {
+        winner=teamA;
+        margin='by '+(a.runs-b.runs)+' run'+(a.runs-b.runs!==1?'s':'');
+        result=winner+' won '+margin+' (over-wise)';
+        decided=true;
+        chaseText=need+' needed but innings ended.';
+      }
+    } else {
+      chaseText='Need '+need+' run'+(need!==1?'s':'')+' from '+ballsLeft+' ball'+(ballsLeft!==1?'s':'')+'.';
+    }
+  }
+  return {teamA:teamA,teamB:teamB,a:a,b:b,complete:complete,decided:decided,tie:tie,winner:winner,margin:margin,result:result,target:target,need:need,ballsLeft:ballsLeft,chaseText:chaseText,count:items.length};
+}
+function makeOverWiseInnings(battingName,bowlingName,entry){
+  var e=entry||{runs:0,wickets:0,over:0};
+  return {
+    battingName:battingName,
+    bowlingName:bowlingName,
+    batting:[],
+    bowling:[],
+    runs:Number(e.runs)||0,
+    wickets:Number(e.wickets)||0,
+    balls:Math.max(0,(Number(e.over)||0)*6),
+    extras:{wide:0,nb:0,bye:0},
+    wideStreak:0,
+    wideCount:0,
+    striker:null,
+    nonStriker:null,
+    bowler:null,
+    lastBowler:null,
+    rotation:[],
+    rotIdx:0,
+    overEvents:[],
+    done:true,
+    started:true,
+    fow:[]
+  };
+}
+function clearOverWiseResultForFixture(i){
+  var f=fixtures[i];
+  if(!f||f.resultSource!=='overwise')return;
+  var key=fixtureKey(f,i);
+  f.played=false;f.winner='';f.margin='';f.result='';f.innings=null;f.mom=null;f.topBat=null;f.topBowl=null;f.superOver=null;f.resultSource='';
+  delete matchesByFixture[key];
+  if(match&&match.fixture===i&&match.over)match=null;
+}
+function finalizeOverWiseFixture(i){
+  var f=fixtures[i];
+  if(!f)return {ok:false,msg:'Fixture not found.'};
+  var key=fixtureKey(f,i);
+  if((match&&match.fixture===i&&!match.over)||(matchesByFixture[key]&&!matchesByFixture[key].over)){
+    return {ok:false,msg:'This fixture already has a live score in progress. Resume or replay that match first.'};
+  }
+  var summary=overWiseSummaryForFixture(i);
+  if(!summary||!summary.count)return {ok:false,msg:'Add over-wise entries first.'};
+  if(!summary.complete){
+    return {ok:false,msg:'Add entries for both innings before finalizing result.'};
+  }
+  if(!summary.decided){
+    return {ok:false,msg:'Second innings is still in progress. Complete chase or innings end first.'};
+  }
+  if(summary.tie){
+    return {ok:false,msg:'Scores are tied. Enter a tiebreak update before finalizing.'};
+  }
+  f.played=true;
+  f.winner=summary.winner;
+  f.margin=summary.margin;
+  f.result=summary.result;
+  f.resultSource='overwise';
+  f.mom=null;f.topBat=null;f.topBowl=null;f.superOver=null;
+  f.innings=[
+    makeOverWiseInnings(summary.teamA,summary.teamB,summary.a),
+    makeOverWiseInnings(summary.teamB,summary.teamA,summary.b)
+  ];
+  matchesByFixture[key]={
+    fixture:i,
+    firstBatIdx:f.a,
+    firstBowlIdx:f.b,
+    innings:clone(f.innings),
+    current:1,
+    result:f.result,
+    over:true
+  };
+  if(match&&match.fixture===i)match=clone(matchesByFixture[key]);
+  return {ok:true,msg:'Result finalized: '+f.result};
+}
+function renderOverWiseScores(){
+  var teamSel=$('overScoreTeam'),oppSel=$('overScoreOpponent'),table=$('overScoreTable');
+  var inningSel=$('overScoreInnings'),inningWrap=$('overScoreInningsWrap');
+  var summaryBox=$('overScoreSummary'),finalizeBtn=$('finalizeOverScoreBtn');
+  if(!teamSel||!oppSel||!table)return;
+  var f=fixtures[overWiseFixture];
+  if(f){
+    if(inningWrap)inningWrap.style.display='inline-block';
+    if(inningSel&&inningSel.value!=='2')inningSel.value='1';
+    teamSel.disabled=true;oppSel.disabled=true;
+    teamSel.innerHTML='<option value="'+f.a+'">'+teams[f.a].name+'</option><option value="'+f.b+'">'+teams[f.b].name+'</option>';
+    oppSel.innerHTML=teamSel.innerHTML;
+    syncOverWiseFixtureInputs();
+    $('overScoreOver').max=String(overs);
+    teamSel.disabled=true;oppSel.disabled=true;
+    if($('overScoreTitle'))$('overScoreTitle').textContent='Over-wise score — Match '+(overWiseFixture+1)+': '+teams[f.a].name+' vs '+teams[f.b].name;
+    if(finalizeBtn){
+      finalizeBtn.style.display='inline-block';
+      finalizeBtn.disabled=false;
+    }
+  } else {
+    if(inningWrap)inningWrap.style.display='none';
+    teamSel.disabled=false;oppSel.disabled=false;
+    var opts=teams.map(function(t,i){return '<option value="'+i+'">'+t.name+'</option>';}).join('');
+    teamSel.innerHTML=opts;oppSel.innerHTML=opts;
+    $('overScoreOver').max='20';
+    if($('overScoreTitle'))$('overScoreTitle').textContent='Over-wise team scores';
+    if(finalizeBtn){
+      finalizeBtn.style.display='none';
+      finalizeBtn.disabled=true;
+    }
+    if(summaryBox)summaryBox.innerHTML='';
+  }
+  if(teamSel.value===oppSel.value&&teams.length>1)oppSel.value=teamSel.value==='0'?'1':'0';
+  var rows=overWiseScores.map(function(x,idx){return (overWiseFixture<0||x.fixture===overWiseFixture)?'<tr><td>'+(x.innings||'-')+'</td><td>'+x.team+'</td><td>'+x.opponent+'</td><td class="num">'+x.over+
+    '</td><td class="num">'+x.runs+'</td><td class="num">'+x.wickets+'</td><td><button type="button" class="secondary" data-delete-over-score="'+idx+'">Delete</button></td></tr>':'';}).join('');
+  table.innerHTML=rows?'<table><tr><th>Inn</th><th>Team</th><th>Opponent</th><th class="num">Over</th><th class="num">Runs</th><th class="num">Wickets</th><th></th></tr>'+rows+'</table>':'<p class="empty">No over-wise scores entered yet.</p>';
+  if(f&&summaryBox){
+    var summary=overWiseSummaryForFixture(overWiseFixture);
+    if(!summary||!summary.count){
+      summaryBox.innerHTML='Innings 1: add first-innings total. Innings 2: track chase until target is reached or overs end.';
+      if(finalizeBtn)finalizeBtn.disabled=true;
+    } else if(!summary.complete){
+      if(summary.a){
+        summaryBox.innerHTML='Target for '+summary.teamB+': <b>'+(summary.a.runs+1)+'</b>. Start innings 2 and keep updating over by over.';
+      } else {
+        summaryBox.innerHTML='Add innings 1 total for '+summary.teamA+' to set the chase target.';
+      }
+      if(finalizeBtn)finalizeBtn.disabled=true;
+    } else if(summary.decided&&summary.tie){
+      summaryBox.innerHTML='Scores are tied: <b>'+summary.teamA+' '+summary.a.runs+'/'+summary.a.wickets+'</b> and <b>'+summary.teamB+' '+summary.b.runs+'/'+summary.b.wickets+'</b>. Add tiebreak update.';
+      if(finalizeBtn)finalizeBtn.disabled=true;
+    } else if(!summary.decided){
+      summaryBox.innerHTML='Second innings: <b>'+summary.teamB+' '+summary.b.runs+'/'+summary.b.wickets+'</b> in '+summary.b.over+' ov. '+summary.chaseText;
+      if(finalizeBtn)finalizeBtn.disabled=true;
+    } else {
+      summaryBox.innerHTML='Result preview: <b>'+summary.result+'</b>';
+      if(finalizeBtn)finalizeBtn.disabled=false;
+    }
+  }
+  Array.prototype.forEach.call(table.querySelectorAll('button[data-delete-over-score]'),function(b){
+    b.addEventListener('click',function(){
+      overWiseScores.splice(parseInt(b.dataset.deleteOverScore,10),1);
+      if(overWiseFixture>=0){
+        clearOverWiseResultForFixture(overWiseFixture);
+        renderFixtures();renderResults();
+      }
+      renderOverWiseScores();publish();
+    });
+  });
+}
+function openOverWiseScores(i){
+  if(!fixtures[i])return;
+  overWiseFixture=i;
+  goTo('overscores');
+  renderOverWiseScores();
+}
+$('addOverScoreBtn').addEventListener('click',function(){
+  var ti=parseInt($('overScoreTeam').value,10),oi=parseInt($('overScoreOpponent').value,10);
+  var over=parseInt($('overScoreOver').value,10),runs=parseInt($('overScoreRuns').value,10),wickets=parseInt($('overScoreWickets').value,10);
+  var innings=overWiseFixture>=0?parseInt($('overScoreInnings').value,10):0;
+  if(isNaN(ti)||isNaN(oi)||ti===oi||isNaN(over)||over<1||isNaN(runs)||runs<0||isNaN(wickets)||wickets<0){
+    $('overScoreMsg').innerHTML='<div class="warnmsg">Select different teams and enter valid over, runs, and wickets.</div>';return;
+  }
+  if(overWiseFixture>=0&&over>overs){
+    $('overScoreMsg').innerHTML='<div class="warnmsg">Over cannot exceed '+overs+' for this tournament.</div>';return;
+  }
+  if(overWiseFixture>=0&&(innings!==1&&innings!==2))innings=1;
+  overWiseScores.push({fixture:overWiseFixture,innings:innings,team:teams[ti].name,opponent:teams[oi].name,over:over,runs:runs,wickets:wickets});
+  if(overWiseFixture>=0){
+    clearOverWiseResultForFixture(overWiseFixture);
+    renderFixtures();renderResults();
+  }
+  $('overScoreMsg').innerHTML='<div class="toast">Over score added.</div>';
+  renderOverWiseScores();publish();
+});
+$('overScoreInnings').addEventListener('change',function(){
+  syncOverWiseFixtureInputs();
+});
+$('finalizeOverScoreBtn').addEventListener('click',function(){
+  if(overWiseFixture<0){
+    $('overScoreMsg').innerHTML='<div class="warnmsg">Open over-wise scoring from a fixture first.</div>';
+    return;
+  }
+  var done=finalizeOverWiseFixture(overWiseFixture);
+  $('overScoreMsg').innerHTML=done.ok
+    ?'<div class="toast">'+done.msg+'</div>'
+    :'<div class="warnmsg">'+done.msg+'</div>';
+  if(done.ok){
+    renderFixtures();renderResults();
+    flushPublishNow();
+  }
+  renderOverWiseScores();publish();
+});
 function inningsTable(i,label){
   return '<div class="inn-head">'+label+' \u2014 '+i.battingName+': '+i.runs+'/'+i.wickets+' ('+oversStr(i.balls)+' ov)</div>'+
   '<table><tr><th>Batter</th><th></th><th class="num">R</th><th class="num">B</th><th class="num">4s</th><th class="num">6s</th><th class="num">2D</th><th class="num">SR</th></tr>'+
@@ -2879,6 +3335,18 @@ function renderScorecard(){
 }
 function renderResults(){
   if(!fixtures.length){$('resultsTable').innerHTML='<p class="empty">No fixtures yet.</p>';return;}
+  function fmtScore(i){
+    if(!i)return '<span style="color:#bbb;">\u2014</span>';
+    var balls=(typeof i.balls==='number'&&isFinite(i.balls))?i.balls:0;
+    return i.runs+'/'+i.wickets+' ('+oversStr(balls)+' ov)';
+  }
+  function teamScoreFor(f,teamName){
+    if(!f||!Array.isArray(f.innings)||!f.innings.length)return '<span style="color:#bbb;">\u2014</span>';
+    for(var ix=0;ix<f.innings.length;ix++){
+      if(f.innings[ix]&&f.innings[ix].battingName===teamName)return fmtScore(f.innings[ix]);
+    }
+    return '<span style="color:#bbb;">\u2014</span>';
+  }
   var done=fixtures.filter(function(f){return f.played;}).length,champ=champion(),html='';
   if(champ)html+='<div class="champ-banner">&#127942; '+champ+' &mdash; Hackathon 2026 Champions</div>';
   html+='<p class="hint"><span class="pill">'+done+' of '+fixtures.length+' matches played</span></p>';
@@ -2886,13 +3354,15 @@ function renderResults(){
     var list=roundFixtures(r);
     if(!list.length)continue;
     html+='<div class="inn-head">'+roundName(r)+'</div>'+
-      '<table><tr><th>Match</th><th>Team A</th><th>Team B</th><th>Winner</th><th>Margin</th><th>Player of the Match</th></tr>'+
+      '<table><tr><th>Match</th><th>Team A</th><th>Team A Score</th><th>Team B</th><th>Team B Score</th><th>Winner</th><th>Margin</th><th>Player of the Match</th></tr>'+
       list.map(function(f){
         var gi=fixtures.indexOf(f);
+        var teamAName=teams[f.a].name,teamBName=teams[f.b].name;
+        var scoreA=teamScoreFor(f,teamAName),scoreB=teamScoreFor(f,teamBName);
         var som=f.superOver?('<br><small style="color:#5c3d99;">SO: '+f.superOver.a.team+' '+
           f.superOver.a.runs+'/'+f.superOver.a.wickets+' v '+f.superOver.b.team+' '+
           f.superOver.b.runs+'/'+f.superOver.b.wickets+'</small>'):'';
-        return '<tr><td><b>Match '+(gi+1)+'</b></td><td>'+teams[f.a].name+'</td><td>'+teams[f.b].name+
+        return '<tr><td><b>Match '+(gi+1)+'</b></td><td>'+teamAName+'</td><td>'+scoreA+'</td><td>'+teamBName+'</td><td>'+scoreB+
           '</td><td>'+(f.winner?'<b>'+f.winner+'</b>'+som:'<span style="color:#bbb;">\u2014</span>')+
           '</td><td>'+(f.played?f.margin:'<span style="color:#bbb;">\u2014</span>')+
           '</td><td>'+(f.played&&f.mom?f.mom.name:'<span style="color:#bbb;">\u2014</span>')+'</td></tr>';
