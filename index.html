@@ -1795,7 +1795,16 @@ $('shuffleFixBtn').addEventListener('click',function(){fixAction(function(){
   for(var i=0;i+1<idx.length;i+=2)fixtures.push(newFixture(idx[i],idx[i+1],0));
   renderFixtures();publish();
 });});
-$('resetFixBtn').addEventListener('click',function(){fixAction(function(){buildFixtures();renderFixtures();publish();});});
+$('resetFixBtn').addEventListener('click',function(){
+  if(!window.confirm('Reset the tournament to sheet order? This clears every result, scorecard, paused match, and Super Over.'))return;
+  buildFixtures();
+  match=null;matchesByFixture={};undoStack=[];activeFixture=-1;so=null;
+  $('matchArea').style.display='none';$('tossCard').style.display='none';
+  $('tieCard').style.display='none';$('superCard').style.display='none';
+  $('lastCard').style.display='none';$('fullScorecard').innerHTML='';
+  hidePrompts();
+  renderFixtures();renderResults();goTo('fixtures');publish();
+});
 var editingFixture=-1;
 function openEditFixture(i){
   var f=fixtures[i];
