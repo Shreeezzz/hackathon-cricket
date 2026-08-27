@@ -978,7 +978,7 @@ function buildSnapshot(){
       fixture:match.fixture, inningsNo:match.current+1,
       batting:i.battingName, bowling:i.bowlingName,
       umpire:(fixtures[match.fixture]&&fixtures[match.fixture].umpire)||'',
-      runs:i.runs, wickets:i.wickets, balls:i.balls,
+      runs:i.runs, wickets:i.wickets, balls:i.balls, freeHit:!!i.freeHit,
       target:(match.current===1?match.innings[0].runs+1:null),
       firstInns:(match.current===1?{t:match.innings[0].battingName,
         r:match.innings[0].runs,w:match.innings[0].wickets}:null),
@@ -1503,6 +1503,7 @@ function vRenderLive(){
     if(need>0&&left>0)chase='<div class="v-chase">Need '+need+' from '+left+' ball'+(left!==1?'s':'')+
       ' \u00b7 RRR '+(need/(left/6)).toFixed(2)+'</div>';
   }
+  if(L.freeHit)chase+='<div class="v-chase">Free Hit next ball</div>';
   var tl=(L.over||[]).map(function(e){
     return '<div class="ball '+(e.cls||'')+'">'+e.label+'</div>';}).join('');
   el.innerHTML='<div class="v-hero">'+
@@ -2160,7 +2161,7 @@ function newInnings(bt,bw){
     batting:bt.players.map(function(p){return {id:p.id,name:p.name,runs:0,balls:0,fours:0,sixes:0,twoD:0,out:false,how:'',batted:false,retiredNO:false};}),
     bowling:bw.players.map(function(p){return {id:p.id,name:p.name,balls:0,runs:0,wickets:0,oversDone:0,catches:0,runouts:0,stumpings:0};}),
     runs:0,wickets:0,balls:0,extras:{wide:0,nb:0,bye:0},wideStreak:0,wideCount:0,
-    striker:null,nonStriker:null,bowler:null,lastBowler:null,
+    striker:null,nonStriker:null,bowler:null,lastBowler:null,freeHit:false,
     rotation:[],rotIdx:0,overEvents:[],done:false,started:false,fow:[]};
 }
 function startMatch(side){
@@ -2182,6 +2183,7 @@ function inn(){
     if(!i.extras)i.extras={wide:0,nb:0,bye:0};
     if(typeof i.wideStreak!=='number')i.wideStreak=0;
     if(typeof i.wideCount!=='number')i.wideCount=0;
+    i.freeHit=!!i.freeHit;
     (i.bowling||[]).forEach(function(b){if(typeof b.oversDone!=='number')b.oversDone=Math.floor((b.balls||0)/6);});
   }
   return i;
@@ -2425,6 +2427,7 @@ function pushEvent(l,c){inn().overEvents.push({label:l,cls:c});}
 function afterLegalBall(){
   var i=inn();
   i.wideStreak=0;
+  i.freeHit=false;
   if(checkInningsEnd())return;
   if(i.balls%6===0){
     i.overEvents=[];
@@ -2487,7 +2490,8 @@ function scoreNoBall(){
   var i=inn(); if(i.done||!i.started)return;
   var bo=bwl(i.bowler); if(!bo){showMsg('Set the bowler before scoring.','warn');return;}
   snapshot();
-  i.runs++;bo.runs++;i.extras.nb++;i.wideStreak=0;pushEvent('NB','ex');render();
+  i.runs++;bo.runs++;i.extras.nb++;i.wideStreak=0;i.freeHit=true;pushEvent('NB','ex');render();
+  showMsg('No ball called. Next legal delivery is a Free Hit.');
 }
 function scoreBye(){
   var i=inn(); if(i.done||!i.started)return;
@@ -2512,12 +2516,17 @@ function openWicketPanel(){
   hidePrompts();$('wicketCard').style.display='block';$('scoringCard').style.display='none';
 }
 function updateWicketForm(){
+  var i=inn();
+  var free=!!(i&&i.freeHit);
+  Array.prototype.forEach.call($('dismissSel').options,function(o){o.disabled=free&&o.value!=='runout';});
+  if(free&&$('dismissSel').value!=='runout')$('dismissSel').value='runout';
   var d=$('dismissSel').value;
   var needsF=!GENERIC_LIVE_MODE&&(d==='caught'||d==='runout'||d==='stumped');
   $('fielderWrap').style.display=needsF?'flex':'none';
-  var i=inn(),bo=i.bowler!=null?bwl(i.bowler):null;
+  var bo=i.bowler!=null?bwl(i.bowler):null;
   var hint='';
-  if(d==='bowled'||d==='hitwicket')hint='Wicket credited to the bowler'+(bo?' ('+playerLabel(i.bowlingName,bo.id,bo.name)+')':'')+'.';
+  if(free)hint='Free Hit: only run out can be recorded as a wicket on this delivery.';
+  else if(d==='bowled'||d==='hitwicket')hint='Wicket credited to the bowler'+(bo?' ('+playerLabel(i.bowlingName,bo.id,bo.name)+')':'')+'.';
   else if(GENERIC_LIVE_MODE&&d==='caught')hint='Generic mode: wicket credited to the bowler.';
   else if(GENERIC_LIVE_MODE&&d==='stumped')hint='Generic mode: wicket credited to the bowler.';
   else if(GENERIC_LIVE_MODE&&d==='runout')hint='Generic mode: wicket credited to the bowler. Either batter can be out.';
@@ -2535,6 +2544,10 @@ $('cancelWicketBtn').addEventListener('click',function(){
 $('confirmWicketBtn').addEventListener('click',function(){
   var i=inn(); if(i.done||!i.started)return;
   var d=$('dismissSel').value;
+  if(i.freeHit&&d!=='runout'){
+    $('wicketHint').textContent='Free Hit: only run out can be recorded as a wicket on this delivery.';
+    return;
+  }
   var outId=parseInt($('outWhoSel').value,10);
   if(isNaN(outId))outId=i.striker;
   var fielder=GENERIC_LIVE_MODE?bwl(i.bowler):((d==='caught'||d==='runout'||d==='stumped')?bwl(parseInt($('fielderSel').value,10)):null);
@@ -2559,7 +2572,7 @@ $('confirmWicketBtn').addEventListener('click',function(){
   i.fow.push(i.runs+'-'+i.wickets+' ('+outName+', '+oversStr(i.balls)+')');
   pushEvent('W','w');
   if(outId===i.nonStriker)i.nonStriker=null;
-  i.wideStreak=0;hidePrompts();render();
+  i.wideStreak=0;i.freeHit=false;hidePrompts();render();
   if(checkInningsEnd())return;
   var next=i.batting.filter(function(b){return !b.out&&!b.batted;});
   if(next.length){
@@ -2978,6 +2991,7 @@ function render(){
     '</div></div>';
   $('widePend').innerHTML=(i.wideStreak>0)
     ?'<div class="wide-pend">1 wide pending \u2014 if the next ball is also a wide, 1 run is added</div>':'';
+  if(i.freeHit)$('widePend').innerHTML+='<div class="wide-pend">Free Hit next ball</div>';
   $('overTimeline').innerHTML=events.length
     ? events.map(function(e){return '<div class="ball '+e.cls+'">'+e.label+'</div>';}).join('')
     : '<span class="hint">New over</span>';
