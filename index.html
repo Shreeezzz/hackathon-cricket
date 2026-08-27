@@ -844,6 +844,7 @@ window.onerror=function(msg,src,line){
 var teams=[],fixtures=[],overs=6,maxSpell=2,rotMode='alternate',fixtureSeq=0,overWiseScores=[],overWiseFixture=-1;
 var match=null,matchesByFixture={},undoStack=[],activeFixture=-1,pendingConfirm=null,liveWin=null,viewerAnnouncement='';
 var viewerLiveEnabled=true;
+var recoveredCompletedResults=0;
 var so=null;
 function $(id){return document.getElementById(id);}
 function clone(obj){
@@ -866,10 +867,42 @@ function dbBase(){
   return u+'/matches/'+MATCH_CODE+'.json';
 }
 function localStateKey(){ return 'cricket_state_'+MATCH_CODE; }
+function localHistoryKey(){ return localStateKey()+'_history'; }
+function stateRichness(state){
+  if(!state||!Array.isArray(state.teams)||!Array.isArray(state.fixtures))return -1;
+  var score=state.teams.length*10+state.fixtures.length*5;
+  state.fixtures.forEach(function(f){
+    if(f.played)score+=1000;
+    if(f.winner)score+=100;
+    if(Array.isArray(f.innings))f.innings.forEach(function(i){
+      score+=50+(Number(i.runs)||0)+(Number(i.balls)||0)+(Number(i.wickets)||0)*5;
+    });
+  });
+  var stored=state.matchesByFixture||{};
+  Object.keys(stored).forEach(function(k){
+    var m=stored[k];score+=100;
+    if(m&&Array.isArray(m.innings))m.innings.forEach(function(i){score+=(Number(i.runs)||0)+(Number(i.balls)||0);});
+  });
+  if(state.match)score+=100;
+  if(Array.isArray(state.overWiseScores))score+=state.overWiseScores.length*20;
+  return score;
+}
 function saveLocalDraft(payload){
   try{
     var p=payload||buildSnapshot();
-    if(p&&p.state)localStorage.setItem(localStateKey(),JSON.stringify(p.state));
+    if(p&&p.state){
+      p.state.savedAt=Date.now();
+      var key=localStateKey(),next=JSON.stringify(p.state),previous=localStorage.getItem(key);
+      if(previous&&previous!==next){
+        var history=[];
+        try{history=JSON.parse(localStorage.getItem(localHistoryKey())||'[]');}catch(e){history=[];}
+        if(!Array.isArray(history))history=[];
+        history.unshift(previous);
+        history=history.slice(0,8);
+        localStorage.setItem(localHistoryKey(),JSON.stringify(history));
+      }
+      localStorage.setItem(key,next);
+    }
   }catch(e){}
 }
 function loadLocalDraft(){
@@ -878,6 +911,23 @@ function loadLocalDraft(){
     if(!raw)return null;
     return JSON.parse(raw);
   }catch(e){ return null; }
+}
+function bestLocalDraft(){
+  var candidates=[],current=loadLocalDraft();
+  if(current&&Array.isArray(current.teams)&&current.teams.length)return current;
+  if(current)candidates.push(current);
+  try{
+    var history=JSON.parse(localStorage.getItem(localHistoryKey())||'[]');
+    if(Array.isArray(history))history.forEach(function(raw){
+      try{var state=typeof raw==='string'?JSON.parse(raw):raw;if(state)candidates.push(state);}catch(e){}
+    });
+  }catch(e){}
+  if(!candidates.length)return null;
+  candidates.sort(function(a,b){
+    var d=stateRichness(b)-stateRichness(a);
+    return d||((Number(b.savedAt)||0)-(Number(a.savedAt)||0));
+  });
+  return candidates[0];
 }
 
 function fixtureKey(f,i){ return String(f&&f.fid||('legacy-'+i)); }
@@ -963,6 +1013,7 @@ function buildSnapshot(){
       rotMode:rotMode,
       viewerAnnouncement:viewerAnnouncement,
       viewerLiveEnabled:viewerLiveEnabled,
+      savedAt:Date.now(),
       overWiseScores:clone(overWiseScores),
       match:clone(match),
       matchesByFixture:clone(matchesByFixture),
@@ -1045,6 +1096,41 @@ function restoreFallbackFromSnapshot(data){
   return true;
 }
 
+function restoreCompletedFixturesFromSavedMatches(){
+  var recovered=0,unfinished={};
+  Object.keys(matchesByFixture||{}).forEach(function(k){
+    var m=matchesByFixture[k];
+    if(m&&m.over===false&&typeof m.fixture==='number')unfinished[m.fixture]=true;
+  });
+  if(match&&match.over===false&&typeof match.fixture==='number')unfinished[match.fixture]=true;
+  Object.keys(matchesByFixture||{}).forEach(function(k){
+    var m=matchesByFixture[k];
+    if(!m||!m.over||typeof m.fixture!=='number'||unfinished[m.fixture])return;
+    var f=fixtures[m.fixture];
+    if(!f||f.played||!Array.isArray(m.innings)||m.innings.length<2)return;
+    var result=String(m.result||'').trim();
+    if(!result)return;
+    var winner='',margin='';
+    var pos=result.indexOf(' won ');
+    if(pos>0){
+      winner=result.substring(0,pos);
+      margin=result.substring(pos+5);
+    } else if(result.indexOf('Match tied')===0){
+      margin='Tie';
+    } else return;
+    f.played=true;
+    f.result=result;
+    f.winner=winner;
+    f.margin=margin;
+    f.innings=clone(m.innings);
+    f.mom=f.mom||null;
+    f.topBat=f.topBat||null;
+    f.topBowl=f.topBowl||null;
+    recovered++;
+  });
+  return recovered;
+}
+
 function applyState(state){
   if(!state||!Array.isArray(state.teams)||!Array.isArray(state.fixtures))return false;
   teams=clone(state.teams);
@@ -1067,6 +1153,7 @@ function applyState(state){
   if(match&&!match.over&&match.fixture>=0&&fixtures[match.fixture]){
     matchesByFixture[fixtureKey(fixtures[match.fixture],match.fixture)]=match;
   }
+  recoveredCompletedResults=restoreCompletedFixturesFromSavedMatches();
   so=state.superOverState?clone(state.superOverState):null;
   activeFixture=(typeof state.activeFixture==='number'&&isFinite(state.activeFixture))?Math.floor(state.activeFixture):-1;
   undoStack=[];
@@ -1141,30 +1228,45 @@ function redrawScorerUI(){
 function restoreStateFromBackend(){
   if(!SYNC_ON||IS_VIEWER)return Promise.resolve(false);
   setSync('local','Loading saved data...');
+  var localState=bestLocalDraft();
   return fetch(dbBase())
     .then(function(r){return r.json();})
     .then(function(data){
       if(!data){
+        if(localState&&applyState(localState)){
+          redrawScorerUI();
+          setSync('on','Recovered from local backup');
+          showMsg('Recovered saved tournament data from this device.');
+          publish();
+          return true;
+        }
         setSync('on','Ready to publish');
         return false;
       }
-      var restored=applyState(data.state);
-      if(!restored)restored=restoreFallbackFromSnapshot(data);
-      if(!restored){
-        var localState=loadLocalDraft();
-        if(localState)restored=applyState(localState);
+      var backendState=data.state&&Array.isArray(data.state.teams)&&Array.isArray(data.state.fixtures)?data.state:null;
+      var chosen=backendState;
+      if(localState){
+        if(!chosen)chosen=localState;
+        else if(!chosen.teams.length&&localState.teams&&localState.teams.length)chosen=localState;
+        else if(!chosen.savedAt&&!localState.savedAt&&stateRichness(localState)>stateRichness(chosen))chosen=localState;
+        else if(Number(localState.savedAt)>Number(chosen.savedAt))chosen=localState;
       }
+      var restored=chosen?applyState(chosen):false;
+      if(!restored)restored=restoreFallbackFromSnapshot(data);
       if(restored){
         redrawScorerUI();
-        setSync('on','Saved data restored');
-        showMsg('Saved tournament data restored from backend.');
+        var usedLocal=!!(chosen&&chosen===localState);
+        setSync('on',recoveredCompletedResults?'Recovered saved match results':(usedLocal?'Recovered fuller local data':'Saved data restored'));
+        showMsg(recoveredCompletedResults
+          ?'Recovered '+recoveredCompletedResults+' completed match result'+(recoveredCompletedResults!==1?'s':'')+' from saved scorecards.'
+          :(usedLocal?'Recovered the most complete tournament data from this device.':'Saved tournament data restored from backend.'));
+        if(usedLocal||recoveredCompletedResults)publish();
         return true;
       }
       setSync('on','Ready to publish');
       return false;
     })
     .catch(function(){
-      var localState=loadLocalDraft();
       if(localState&&applyState(localState)){
         redrawScorerUI();
         setSync('on','Recovered from local backup');
@@ -1987,6 +2089,7 @@ $('shuffleFixBtn').addEventListener('click',function(){fixAction(function(){
 });});
 $('resetFixBtn').addEventListener('click',function(){
   if(!window.confirm('Reset the tournament to sheet order? This clears every result, scorecard, paused match, and Super Over.'))return;
+  try{localStorage.removeItem(localHistoryKey());localStorage.removeItem(localStateKey());}catch(e){}
   buildFixtures();
   match=null;matchesByFixture={};undoStack=[];activeFixture=-1;so=null;overWiseScores=[];overWiseFixture=-1;
   $('matchArea').style.display='none';$('tossCard').style.display='none';
