@@ -260,13 +260,16 @@
       <button id="showAnnouncementBtn" type="button">Show announcement</button>
       <button id="clearAnnouncementBtn" class="secondary" type="button">Clear</button>
       <button id="toggleViewerLiveBtn" class="secondary" type="button">Hide live match</button>
+      <button id="toggleAllViewersBtn" class="danger" type="button">Pause viewer URL</button>
     </div>
     <div id="viewerLiveState" class="hint">Viewer live tab: Visible</div>
+    <div id="allViewersState" class="hint">Viewer URL: Active</div>
   </div>
 
   <!-- ============ VIEWER MODE ============ -->
   <div id="viewerRoot" style="display:none;">
     <div id="viewerAnnouncementDisplay" class="announcement-display" style="display:none;"></div>
+    <div id="vPaused" class="v-none" style="display:none;"><h3>Viewer display paused</h3><p>Updates are temporarily unavailable.</p></div>
     <div class="vtabs">
       <button class="vtab active" id="vTabOverwise" type="button">&#128202; Over-wise score</button>
       <button class="vtab" id="vTabLive" type="button">&#128250; Live match</button>
@@ -844,6 +847,7 @@ window.onerror=function(msg,src,line){
 var teams=[],fixtures=[],overs=6,maxSpell=2,rotMode='alternate',fixtureSeq=0,overWiseScores=[],overWiseFixture=-1;
 var match=null,matchesByFixture={},undoStack=[],activeFixture=-1,pendingConfirm=null,liveWin=null,viewerAnnouncement='';
 var viewerLiveEnabled=true;
+var allViewersPaused=false;
 var recoveredCompletedResults=0;
 var so=null;
 function $(id){return document.getElementById(id);}
@@ -861,6 +865,7 @@ var scorerCode=qs('score');
 var MATCH_CODE=(scorerCode||urlCode||DEFAULT_MATCH_CODE).replace(/[^A-Za-z0-9_-]/g,'').substring(0,40)||DEFAULT_MATCH_CODE;
 var IS_VIEWER=(!scorerCode)&&(urlCode!==null);
 var SYNC_ON=!!(FIREBASE_URL&&FIREBASE_URL.indexOf('http')===0);
+var stateReady=!SYNC_ON||IS_VIEWER;
 
 function dbBase(){
   var u=FIREBASE_URL.replace(/\/+$/,'');
@@ -950,7 +955,7 @@ else setSync('local',IS_VIEWER?'Connecting\u2026':'Ready to publish');
 /* ================= PUBLISH (scorer) ================= */
 var pubTimer=null,pubPending=false,lastPubOk=true;
 function publish(){
-  if(!SYNC_ON||IS_VIEWER)return;
+  if(!SYNC_ON||IS_VIEWER||!stateReady)return;
   saveLocalDraft();
   pubPending=true;
   if(pubTimer)return;
@@ -972,7 +977,7 @@ function publish(){
   },450);
 }
 function flushPublishNow(){
-  if(!SYNC_ON||IS_VIEWER)return;
+  if(!SYNC_ON||IS_VIEWER||!stateReady)return;
   var payload;
   try{ payload=buildSnapshot(); }catch(e){ return; }
   saveLocalDraft(payload);
@@ -988,7 +993,7 @@ function flushPublishNow(){
 
 function buildSnapshot(){
   syncCurrentMatch();
-  var snap={ updated:Date.now(), overs:overs, code:MATCH_CODE,announcement:viewerAnnouncement,liveVisible:viewerLiveEnabled,
+  var snap={ updated:Date.now(), overs:overs, code:MATCH_CODE,announcement:viewerAnnouncement,liveVisible:viewerLiveEnabled,viewerPaused:allViewersPaused,
     teams:teams.map(function(t){return t.name;}),
     teamDetails:teams.map(function(t){
       return {name:t.name,players:t.players.map(function(p){
@@ -1013,6 +1018,7 @@ function buildSnapshot(){
       rotMode:rotMode,
       viewerAnnouncement:viewerAnnouncement,
       viewerLiveEnabled:viewerLiveEnabled,
+      allViewersPaused:allViewersPaused,
       savedAt:Date.now(),
       overWiseScores:clone(overWiseScores),
       match:clone(match),
@@ -1092,6 +1098,7 @@ function restoreFallbackFromSnapshot(data){
   maxSpell=Math.max(1,maxSpell);
   rotMode='alternate';
   viewerLiveEnabled=(data&&data.liveVisible!==false);
+  allViewersPaused=!!(data&&data.viewerPaused);
   match=null;matchesByFixture={};so=null;activeFixture=-1;undoStack=[];
   return true;
 }
@@ -1144,10 +1151,12 @@ function applyState(state){
   rotMode=(state.rotMode==='manual'||state.rotMode==='alternate'||state.rotMode==='cycle')?state.rotMode:'alternate';
   viewerAnnouncement=String(state.viewerAnnouncement||'');
   viewerLiveEnabled=(state.viewerLiveEnabled!==false);
+  allViewersPaused=!!state.allViewersPaused;
   overWiseScores=Array.isArray(state.overWiseScores)?clone(state.overWiseScores):[];
   if($('viewerAnnouncementInput'))$('viewerAnnouncementInput').value=viewerAnnouncement;
   renderViewerAnnouncement(viewerAnnouncement);
   renderViewerLiveToggle();
+  renderAllViewersToggle();
   matchesByFixture=state.matchesByFixture?clone(state.matchesByFixture):{};
   match=state.match?clone(state.match):null;
   if(match&&!match.over&&match.fixture>=0&&fixtures[match.fixture]){
@@ -1227,6 +1236,7 @@ function redrawScorerUI(){
 
 function restoreStateFromBackend(){
   if(!SYNC_ON||IS_VIEWER)return Promise.resolve(false);
+  stateReady=false;
   setSync('local','Loading saved data...');
   var localState=bestLocalDraft();
   return fetch(dbBase())
@@ -1235,11 +1245,13 @@ function restoreStateFromBackend(){
       if(!data){
         if(localState&&applyState(localState)){
           redrawScorerUI();
+          stateReady=true;
           setSync('on','Recovered from local backup');
           showMsg('Recovered saved tournament data from this device.');
           publish();
           return true;
         }
+        stateReady=true;
         setSync('on','Ready to publish');
         return false;
       }
@@ -1248,13 +1260,19 @@ function restoreStateFromBackend(){
       if(localState){
         if(!chosen)chosen=localState;
         else if(!chosen.teams.length&&localState.teams&&localState.teams.length)chosen=localState;
-        else if(!chosen.savedAt&&!localState.savedAt&&stateRichness(localState)>stateRichness(chosen))chosen=localState;
-        else if(Number(localState.savedAt)>Number(chosen.savedAt))chosen=localState;
+        else {
+          var backendRichness=stateRichness(chosen),localRichness=stateRichness(localState);
+          if(localRichness>backendRichness+100)chosen=localState;
+          else if(backendRichness>localRichness+100)chosen=backendState;
+          else if(Number(localState.savedAt)>Number(chosen.savedAt))chosen=localState;
+        }
       }
       var restored=chosen?applyState(chosen):false;
       if(!restored)restored=restoreFallbackFromSnapshot(data);
       if(restored){
         redrawScorerUI();
+        stateReady=true;
+        saveLocalDraft();
         var usedLocal=!!(chosen&&chosen===localState);
         setSync('on',recoveredCompletedResults?'Recovered saved match results':(usedLocal?'Recovered fuller local data':'Saved data restored'));
         showMsg(recoveredCompletedResults
@@ -1263,16 +1281,19 @@ function restoreStateFromBackend(){
         if(usedLocal||recoveredCompletedResults)publish();
         return true;
       }
+      stateReady=true;
       setSync('on','Ready to publish');
       return false;
     })
     .catch(function(){
       if(localState&&applyState(localState)){
         redrawScorerUI();
+        stateReady=true;
         setSync('on','Recovered from local backup');
         showMsg('Recovered latest local score after refresh.');
         return true;
       }
+      stateReady=true;
       setSync('off','Could not load saved data; continuing locally');
       return false;
     });
@@ -1295,6 +1316,14 @@ function renderViewerLiveToggle(){
   }
   if(state)state.innerHTML='Viewer live tab: <b>'+(viewerLiveEnabled?'Visible':'Hidden')+'</b>';
 }
+function renderAllViewersToggle(){
+  var btn=$('toggleAllViewersBtn'),state=$('allViewersState');
+  if(btn){
+    btn.textContent=allViewersPaused?'Resume viewer URL':'Pause viewer URL';
+    btn.className=allViewersPaused?'gold':'danger';
+  }
+  if(state)state.innerHTML='Viewer URL: <b>'+(allViewersPaused?'Paused — no tournament data displayed':'Active')+'</b>';
+}
 function setupViewerAnnouncement(){
   var input=$('viewerAnnouncementInput');
   if(!input)return;
@@ -1305,6 +1334,7 @@ function setupViewerAnnouncement(){
   input.value=saved;
   renderViewerAnnouncement(saved);
   renderViewerLiveToggle();
+  renderAllViewersToggle();
   $('showAnnouncementBtn').addEventListener('click',function(){
     var text=input.value.trim();
     try{localStorage.setItem('cricketViewerAnnouncement',text);}catch(e){}
@@ -1325,6 +1355,16 @@ function setupViewerAnnouncement(){
     tbtn.addEventListener('click',function(){
       viewerLiveEnabled=!viewerLiveEnabled;
       renderViewerLiveToggle();
+      publish();
+    });
+  }
+  var allBtn=$('toggleAllViewersBtn');
+  if(allBtn&&!allBtn.dataset.bound){
+    allBtn.dataset.bound='1';
+    allBtn.addEventListener('click',function(){
+      allViewersPaused=!allViewersPaused;
+      renderAllViewersToggle();
+      flushPublishNow();
       publish();
     });
   }
@@ -1413,7 +1453,22 @@ function formatFixtureTime(value){
   return isNaN(d.getTime())?value:d.toLocaleString([], {dateStyle:'medium',timeStyle:'short'});
 }
 function vRender(){
-  renderViewerAnnouncement(vData&&vData.announcement);
+  var paused=!!(vData&&vData.viewerPaused);
+  var tabs=document.querySelector('#viewerRoot .vtabs');
+  if(tabs)tabs.style.display=paused?'none':'flex';
+  $('vPaused').style.display=paused?'block':'none';
+  renderViewerAnnouncement(paused?'':(vData&&vData.announcement));
+  if(paused){
+    $('vOverwise').style.display='none';
+    $('vLive').style.display='none';
+    $('vAll').style.display='none';
+    $('vTeams').style.display='none';
+    return;
+  }
+  $('vOverwise').style.display=(vTab==='overwise')?'block':'none';
+  $('vLive').style.display=(vTab==='live')?'block':'none';
+  $('vAll').style.display=(vTab==='all')?'block':'none';
+  $('vTeams').style.display=(vTab==='teams')?'block':'none';
   if(vTab==='overwise')vRenderOverwise();
   else if(vTab==='live')vRenderLive();
   else if(vTab==='all')vRenderAll();
@@ -1982,8 +2037,8 @@ $('saveNewTeamBtn').addEventListener('click',function(){
   players.forEach(function(p,i){p.id=nextId+i;p.captain=(i+1===captain);});
   teams.push({name:name,players:players});
   $('addTeamCard').style.display='none';
-  var tournamentStarted=fixtures.some(function(f){return f.played;})||Object.keys(matchesByFixture).some(function(k){
-    return matchesByFixture[k]&&!matchesByFixture[k].over;
+  var tournamentStarted=fixtures.some(function(f){return f.played;})||!!match||Object.keys(matchesByFixture).some(function(k){
+    return !!matchesByFixture[k];
   });
   if(!tournamentStarted)buildFixtures();
   renderTeams();renderFixtures();publish();
