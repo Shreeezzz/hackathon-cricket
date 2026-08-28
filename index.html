@@ -191,6 +191,14 @@
   .vtab{background:rgba(255,255,255,.16);color:#fff;border:none;padding:8px 18px;
     border-radius:18px;cursor:pointer;font-size:.84rem;font-weight:600;}
   .vtab.active{background:#fff;color:var(--green-dark);}
+  .scorer-lock{position:fixed;inset:0;z-index:9999;background:linear-gradient(155deg,#0b1f5c 0%,#1d4ed8 60%,#06b6d4 100%);
+    display:flex;align-items:center;justify-content:center;padding:20px;}
+  .scorer-lock-card{width:min(420px,100%);background:#fff;border-radius:16px;padding:24px;
+    box-shadow:0 18px 50px rgba(0,0,0,.35);text-align:center;}
+  .scorer-lock-card h2{margin:0 0 8px;color:var(--green-dark);}
+  .scorer-lock-card p{color:#667085;font-size:.86rem;}
+  .scorer-lock-card input{width:100%;font-size:1.2rem;text-align:center;letter-spacing:.25em;margin:8px 0;}
+  .scorer-lock-card button{width:100%;margin-top:8px;}
   .setup-box{background:#fff8e1;border:2px solid var(--gold);border-radius:12px;padding:16px 18px;margin-bottom:16px;}
   .setup-box h3{margin:0 0 8px;color:#8a6d00;font-size:1rem;}
   .setup-box code{background:#fff;border:1px solid #e0d6b0;border-radius:5px;padding:2px 6px;font-size:.83rem;}
@@ -229,15 +237,26 @@
     #resultsTable table td{border:0;padding:2px 0;font-size:.82rem;}
     #resultsTable table td:first-child{grid-column:1/-1;font-size:.9rem;color:var(--green-dark);}
     #resultsTable table td:nth-child(2)::before{content:'Team A: ';font-weight:700;color:#666;}
-    #resultsTable table td:nth-child(3)::before{content:'Team B: ';font-weight:700;color:#666;}
-    #resultsTable table td:nth-child(4){grid-column:1/-1;}
-    #resultsTable table td:nth-child(4)::before{content:'Winner: ';font-weight:700;color:#666;}
-    #resultsTable table td:nth-child(5)::before{content:'Margin: ';font-weight:700;color:#666;}
-    #resultsTable table td:nth-child(6)::before{content:'Player of the Match: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(3)::before{content:'Team A Score: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(4)::before{content:'Team B: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(5)::before{content:'Team B Score: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(6){grid-column:1/-1;}
+    #resultsTable table td:nth-child(6)::before{content:'Winner: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(7)::before{content:'Margin: ';font-weight:700;color:#666;}
+    #resultsTable table td:nth-child(8)::before{content:'Player of the Match: ';font-weight:700;color:#666;}
   }
 </style>
 </head>
 <body>
+<div id="scorerLock" class="scorer-lock" style="display:none;">
+  <div class="scorer-lock-card">
+    <h2>Scorer access</h2>
+    <p>Enter the tournament scorer PIN to continue.</p>
+    <input id="scorerPinInput" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="PIN">
+    <button id="unlockScorerBtn" type="button">Unlock scorer</button>
+    <div id="scorerPinError"></div>
+  </div>
+</div>
 <div class="wrap">
   <div id="errBar" class="banner-err" style="display:none;"></div>
   <header>
@@ -359,6 +378,28 @@
       <div class="btn-row" style="margin-top:0;">
         <button id="shuffleFixBtn" class="gold" type="button">&#128256; Randomise pairings</button>
         <button id="resetFixBtn" class="secondary" type="button">&#8634; Reset to sheet order</button>
+        <button id="addFixtureBtn" type="button">&#10133; Add fixture</button>
+      </div>
+      <div class="prompt-panel" id="addFixtureCard" style="display:none;margin-top:14px;">
+        <h3>Add a new fixture</h3>
+        <p class="hint">This appends one fixture. Existing live matches, paused matches, results, and match numbers remain unchanged.</p>
+        <div class="row">
+          <label>Team A: <select id="addFixtureTeamA"></select></label>
+          <label>Team B: <select id="addFixtureTeamB"></select></label>
+          <label>Round:
+            <select id="addFixtureRound">
+              <option value="0">Elimination Round</option>
+              <option value="1">Quarter Finals</option>
+              <option value="2">Semi Finals</option>
+              <option value="3">Final</option>
+            </select>
+          </label>
+          <label>Tentative date/time: <input type="datetime-local" id="addFixtureTime"></label>
+          <label>Umpire: <input type="text" id="addFixtureUmpire" placeholder="Enter umpire name"></label>
+          <button id="saveNewFixtureBtn" type="button">Create fixture</button>
+          <button id="cancelNewFixtureBtn" class="secondary" type="button">Cancel</button>
+        </div>
+        <div id="addFixtureWarn"></div>
       </div>
       <div class="prompt-panel" id="editFixtureCard" style="display:none;margin-top:14px;">
         <h3>Edit fixture</h3>
@@ -677,10 +718,12 @@
       <h3>Data backup</h3>
       <div class="btn-row" style="margin-top:0;">
         <button id="downloadDataBtn" class="secondary" type="button">Download data backup (JSON)</button>
+        <button id="cloudBackupBtn" class="gold" type="button">Create cloud backup now</button>
+        <button id="restoreCloudBackupBtn" class="secondary" type="button">Restore latest cloud backup</button>
         <button id="importDataBtn" class="secondary" type="button">Import backup</button>
         <input type="file" id="importDataFile" accept="application/json,.json" style="display:none;">
       </div>
-      <p class="hint">Download after important updates. Import will replace current loaded data in this match code.</p>
+      <p class="hint">Cloud backups are also created automatically when completed match results change. Import will replace current loaded data in this match code.</p>
       <div id="dataBackupMsg"></div>
     </div>
   </div>
@@ -828,6 +871,7 @@ var MiniXLSX=(function(){
    ============================================================ */
 var FIREBASE_URL = 'https://hackathoncricket2026-default-rtdb.firebaseio.com';
 var DEFAULT_MATCH_CODE = 'hackathon2026';
+var SCORER_PIN = '2026'; // Change this tournament-only PIN before publishing.
 /* ========================================================== */
 
 window.onerror=function(msg,src,line){
@@ -870,6 +914,14 @@ var stateReady=!SYNC_ON||IS_VIEWER;
 function dbBase(){
   var u=FIREBASE_URL.replace(/\/+$/,'');
   return u+'/matches/'+MATCH_CODE+'.json';
+}
+function cloudBackupBase(){
+  var u=FIREBASE_URL.replace(/\/+$/,'');
+  return u+'/matches/'+MATCH_CODE+'__backup__'+Date.now()+'.json';
+}
+function latestCloudBackupBase(){
+  var u=FIREBASE_URL.replace(/\/+$/,'');
+  return u+'/matches/'+MATCH_CODE+'__backup_latest.json';
 }
 function localStateKey(){ return 'cricket_state_'+MATCH_CODE; }
 function localHistoryKey(){ return localStateKey()+'_history'; }
@@ -936,6 +988,14 @@ function bestLocalDraft(){
 }
 
 function fixtureKey(f,i){ return String(f&&f.fid||('legacy-'+i)); }
+function refreshFixtureSequence(){
+  var highest=fixtures.length;
+  fixtures.forEach(function(f){
+    var m=/^fixture-(\d+)$/.exec(String(f&&f.fid||''));
+    if(m&&parseInt(m[1],10)>highest)highest=parseInt(m[1],10);
+  });
+  fixtureSeq=highest;
+}
 function syncCurrentMatch(){
   if(match&&!match.over&&match.fixture>=0&&fixtures[match.fixture]){
     matchesByFixture[fixtureKey(fixtures[match.fixture],match.fixture)]=match;
@@ -953,27 +1013,64 @@ if(!SYNC_ON) setSync('local','Local only \u2014 live sharing not configured');
 else setSync('local',IS_VIEWER?'Connecting\u2026':'Ready to publish');
 
 /* ================= PUBLISH (scorer) ================= */
-var pubTimer=null,pubPending=false,lastPubOk=true;
+var pubTimer=null,pubPending=false,pubInFlight=false,lastPubOk=true,backendETag=null,syncConflict=false;
+function completedResultSignature(payload){
+  var state=payload&&payload.state;
+  if(!state||!Array.isArray(state.fixtures))return '';
+  return state.fixtures.map(function(f,i){return i+':'+(f.played?'1':'0')+':'+(f.result||'');}).join('|');
+}
+function createCloudBackup(reason,payload){
+  if(!SYNC_ON||IS_VIEWER)return Promise.resolve(false);
+  var snapPayload=payload;
+  try{if(!snapPayload)snapPayload=buildSnapshot();}catch(e){return Promise.resolve(false);}
+  var archive={backupVersion:1,reason:reason||'manual',createdAt:Date.now(),matchCode:MATCH_CODE,state:snapPayload.state};
+  var options={method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(archive)};
+  return Promise.all([
+    fetch(latestCloudBackupBase(),options).then(function(r){return r.ok;}),
+    fetch(cloudBackupBase(),options).then(function(r){return r.ok;})
+  ]).then(function(result){return result[0]||result[1];}).catch(function(){return false;});
+}
+function maybeCreateResultBackup(payload){
+  var signature=completedResultSignature(payload);
+  if(!signature||signature.indexOf(':1:')<0)return;
+  var key='cricket_cloud_backup_signature_'+MATCH_CODE,last='';
+  try{last=localStorage.getItem(key)||'';}catch(e){}
+  if(signature===last)return;
+  createCloudBackup('completed results changed',payload).then(function(ok){
+    if(ok)try{localStorage.setItem(key,signature);}catch(e){}
+  });
+}
 function publish(){
   if(!SYNC_ON||IS_VIEWER||!stateReady)return;
   saveLocalDraft();
+  if(syncConflict){setSync('off','Sync conflict — local score preserved; refresh to reconcile');return;}
   pubPending=true;
   if(pubTimer)return;
   pubTimer=setTimeout(function(){
     pubTimer=null;
     if(!pubPending)return;
+    if(pubInFlight){publish();return;}
     pubPending=false;
     var payload;
     try{ payload=buildSnapshot(); }catch(e){ return; }
+    pubInFlight=true;
+    var headers={'Content-Type':'application/json','X-Firebase-ETag':'true'};
+    if(backendETag)headers['If-Match']=backendETag;
     try{
-      fetch(dbBase(),{method:'PUT',headers:{'Content-Type':'application/json'},
+      fetch(dbBase(),{method:'PUT',headers:headers,
         body:JSON.stringify(payload)})
       .then(function(r){
-        if(r.ok){ lastPubOk=true; setSync('on','Live \u2014 sharing to viewers'); }
-        else { lastPubOk=false; setSync('off','Sync error '+r.status+' \u2014 scoring still works'); }
+        pubInFlight=false;
+        if(r.ok){
+          backendETag=r.headers.get('ETag')||backendETag;
+          lastPubOk=true;setSync('on','Live \u2014 sharing to viewers');maybeCreateResultBackup(payload);
+        } else if(r.status===412){
+          syncConflict=true;lastPubOk=false;setSync('off','Newer cloud data detected — local score preserved; refresh to reconcile');
+        } else {lastPubOk=false;setSync('off','Sync error '+r.status+' \u2014 scoring still works');}
+        if(pubPending&&!syncConflict)publish();
       })
-      .catch(function(){ lastPubOk=false; setSync('off','Offline \u2014 scoring still works, will retry'); });
-    }catch(e){ setSync('off','Offline \u2014 scoring still works'); }
+      .catch(function(){pubInFlight=false;lastPubOk=false;setSync('off','Offline \u2014 scoring still works, will retry');});
+    }catch(e){pubInFlight=false;setSync('off','Offline \u2014 scoring still works');}
   },450);
 }
 function flushPublishNow(){
@@ -981,10 +1078,13 @@ function flushPublishNow(){
   var payload;
   try{ payload=buildSnapshot(); }catch(e){ return; }
   saveLocalDraft(payload);
+  if(syncConflict||pubInFlight)return;
+  var headers={'Content-Type':'application/json','X-Firebase-ETag':'true'};
+  if(backendETag)headers['If-Match']=backendETag;
   try{
     fetch(dbBase(),{
       method:'PUT',
-      headers:{'Content-Type':'application/json'},
+      headers:headers,
       body:JSON.stringify(payload),
       keepalive:true
     });
@@ -1093,7 +1193,7 @@ function restoreFallbackFromSnapshot(data){
       superOver:null
     };
   }):[];
-  fixtureSeq=fixtures.length;
+  refreshFixtureSequence();
   overs=(typeof data.overs==='number'&&isFinite(data.overs)&&data.overs>0)?Math.floor(data.overs):overs;
   maxSpell=Math.max(1,maxSpell);
   rotMode='alternate';
@@ -1115,6 +1215,9 @@ function restoreCompletedFixturesFromSavedMatches(){
     if(!m||!m.over||typeof m.fixture!=='number'||unfinished[m.fixture])return;
     var f=fixtures[m.fixture];
     if(!f||f.played||!Array.isArray(m.innings)||m.innings.length<2)return;
+    var expectedA=teams[f.a]&&teams[f.a].name,expectedB=teams[f.b]&&teams[f.b].name;
+    var savedTeams=[m.innings[0]&&m.innings[0].battingName,m.innings[1]&&m.innings[1].battingName];
+    if(savedTeams.indexOf(expectedA)<0||savedTeams.indexOf(expectedB)<0)return;
     var result=String(m.result||'').trim();
     if(!result)return;
     var winner='',margin='';
@@ -1122,6 +1225,7 @@ function restoreCompletedFixturesFromSavedMatches(){
     if(pos>0){
       winner=result.substring(0,pos);
       margin=result.substring(pos+5);
+      if(winner!==expectedA&&winner!==expectedB)return;
     } else if(result.indexOf('Match tied')===0){
       margin='Tie';
     } else return;
@@ -1145,7 +1249,7 @@ function applyState(state){
     if(!f.fid)f.fid='legacy-'+i;
     return f;
   });
-  fixtureSeq=fixtures.length;
+  refreshFixtureSequence();
   overs=(typeof state.overs==='number'&&isFinite(state.overs)&&state.overs>0)?Math.floor(state.overs):overs;
   maxSpell=(typeof state.maxSpell==='number'&&isFinite(state.maxSpell)&&state.maxSpell>0)?Math.floor(state.maxSpell):maxSpell;
   rotMode=(state.rotMode==='manual'||state.rotMode==='alternate'||state.rotMode==='cycle')?state.rotMode:'alternate';
@@ -1237,10 +1341,12 @@ function redrawScorerUI(){
 function restoreStateFromBackend(){
   if(!SYNC_ON||IS_VIEWER)return Promise.resolve(false);
   stateReady=false;
+  syncConflict=false;
+  backendETag=null;
   setSync('local','Loading saved data...');
   var localState=bestLocalDraft();
-  return fetch(dbBase())
-    .then(function(r){return r.json();})
+  return fetch(dbBase(),{headers:{'X-Firebase-ETag':'true'}})
+    .then(function(r){backendETag=r.headers.get('ETag');return r.json();})
     .then(function(data){
       if(!data){
         if(localState&&applyState(localState)){
@@ -1727,7 +1833,6 @@ function vRenderAll(){
         (f.umpire?'<div class="hint" style="margin-top:3px;">&#9876; Umpire: '+f.umpire+'</div>':'')+
         (f.played?'<div class="res">&#127942; '+(f.result||f.winner).replace(' (manual selection)','')+'</div>':'')+
         (sc?'<div class="hint" style="margin-top:3px;">'+sc+'</div>':'')+
-        (f.mom?'<div class="hint">Player of the Match: '+f.mom+'</div>':'')+
         '</div></div>';
     });
     html+='</div>';
@@ -2037,13 +2142,11 @@ $('saveNewTeamBtn').addEventListener('click',function(){
   players.forEach(function(p,i){p.id=nextId+i;p.captain=(i+1===captain);});
   teams.push({name:name,players:players});
   $('addTeamCard').style.display='none';
-  var tournamentStarted=fixtures.some(function(f){return f.played;})||!!match||Object.keys(matchesByFixture).some(function(k){
-    return !!matchesByFixture[k];
-  });
-  if(!tournamentStarted)buildFixtures();
+  var existingFixtures=fixtures.length>0;
+  if(!existingFixtures)buildFixtures();
   renderTeams();renderFixtures();publish();
-  if(tournamentStarted){
-    $('loadStatus').innerHTML='<div class="toast">Team added. Existing fixtures and scores were kept; the new team will be available for the next fixture setup.</div>';
+  if(existingFixtures){
+    $('loadStatus').innerHTML='<div class="toast">Team added. Existing fixtures and scores were kept. Use Add fixture to schedule the new team.</div>';
   }
 });
 var editingTeam=-1;
@@ -2126,6 +2229,47 @@ function buildFixtures(){
   fixtures=[];
   for(var i=0;i+1<teams.length;i+=2)fixtures.push(newFixture(i,i+1,0));
 }
+function openAddFixturePanel(){
+  if(teams.length<2){showMsg('Add at least two teams before creating a fixture.','warn');return;}
+  var opts=teams.map(function(t,i){return '<option value="'+i+'">'+t.name+'</option>';}).join('');
+  $('addFixtureTeamA').innerHTML=opts;
+  $('addFixtureTeamB').innerHTML=opts;
+  $('addFixtureTeamA').value=String(Math.max(0,teams.length-1));
+  $('addFixtureTeamB').value=teams.length>1?'0':'';
+  if($('addFixtureTeamA').value===$('addFixtureTeamB').value&&teams.length>1)$('addFixtureTeamB').value='1';
+  $('addFixtureRound').value=String(Math.min(3,maxRound()));
+  $('addFixtureTime').value='';
+  $('addFixtureUmpire').value='';
+  $('addFixtureWarn').innerHTML='';
+  $('addFixtureCard').style.display='block';
+  $('addFixtureCard').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+$('addFixtureBtn').addEventListener('click',openAddFixturePanel);
+$('cancelNewFixtureBtn').addEventListener('click',function(){$('addFixtureCard').style.display='none';});
+$('saveNewFixtureBtn').addEventListener('click',function(){
+  var a=parseInt($('addFixtureTeamA').value,10),b=parseInt($('addFixtureTeamB').value,10);
+  var round=parseInt($('addFixtureRound').value,10);
+  if(isNaN(a)||isNaN(b)||!teams[a]||!teams[b]){
+    $('addFixtureWarn').innerHTML='<div class="warnmsg">Select both teams.</div>';return;
+  }
+  if(a===b){
+    $('addFixtureWarn').innerHTML='<div class="warnmsg">Team A and Team B must be different.</div>';return;
+  }
+  if(isNaN(round)||round<0||round>3)round=0;
+  var duplicate=fixtures.some(function(f){
+    return f.round===round&&((f.a===a&&f.b===b)||(f.a===b&&f.b===a));
+  });
+  if(duplicate){
+    $('addFixtureWarn').innerHTML='<div class="warnmsg">This pairing already exists in the selected round.</div>';return;
+  }
+  var f=newFixture(a,b,round);
+  f.scheduled=$('addFixtureTime').value||'';
+  f.umpire=$('addFixtureUmpire').value.trim();
+  fixtures.push(f);
+  $('addFixtureCard').style.display='none';
+  renderFixtures();renderResults();publish();
+  showMsg('Match '+fixtures.length+' added: '+teams[a].name+' vs '+teams[b].name+'. Existing matches were not changed.');
+});
 function shuf(a){a=a.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=a[i];a[i]=a[j];a[j]=t;}return a;}
 function fixAction(fn){
   if(fixtures.filter(function(f){return f.played;}).length){
@@ -2133,7 +2277,7 @@ function fixAction(fn){
       '<p>Scores already recorded will be lost.</p><div class="row">'+
       '<button class="danger" id="fixYes" type="button">Yes, clear and continue</button> '+
       '<button class="secondary" id="fixNo" type="button">Cancel</button></div></div>';
-    $('fixYes').addEventListener('click',function(){$('fixConfirm').innerHTML='';fn();});
+    $('fixYes').addEventListener('click',function(){createCloudBackup('before fixture reset');$('fixConfirm').innerHTML='';fn();});
     $('fixNo').addEventListener('click',function(){$('fixConfirm').innerHTML='';});
   } else fn();
 }
@@ -2144,6 +2288,7 @@ $('shuffleFixBtn').addEventListener('click',function(){fixAction(function(){
 });});
 $('resetFixBtn').addEventListener('click',function(){
   if(!window.confirm('Reset the tournament to sheet order? This clears every result, scorecard, paused match, and Super Over.'))return;
+  createCloudBackup('before tournament reset');
   try{localStorage.removeItem(localHistoryKey());localStorage.removeItem(localStateKey());}catch(e){}
   buildFixtures();
   match=null;matchesByFixture={};undoStack=[];activeFixture=-1;so=null;overWiseScores=[];overWiseFixture=-1;
@@ -2648,7 +2793,7 @@ function scoreNoBall(){
   var i=inn(); if(i.done||!i.started)return;
   var bo=bwl(i.bowler); if(!bo){showMsg('Set the bowler before scoring.','warn');return;}
   snapshot();
-  i.runs++;bo.runs++;i.extras.nb++;i.wideStreak=0;i.freeHit=true;pushEvent('NB','ex');render();
+  i.wideStreak=0;i.freeHit=true;pushEvent('NB','ex');render();
   showMsg('No ball called. Next legal delivery is a Free Hit.');
 }
 function scoreBye(){
@@ -3091,6 +3236,33 @@ $('abandonBtn').addEventListener('click',function(){
 $('copyViewerBtn').addEventListener('click',function(){copyField('viewerLink');});
 $('copyScorerBtn').addEventListener('click',function(){copyField('scorerLink');});
 $('downloadDataBtn').addEventListener('click',downloadDataBackup);
+$('cloudBackupBtn').addEventListener('click',function(){
+  setDataBackupMsg('<div class="toast">Creating cloud backup...</div>');
+  createCloudBackup('manual backup').then(function(ok){
+    setDataBackupMsg(ok
+      ?'<div class="toast">&#10004; Cloud backup created.</div>'
+      :'<div class="warnmsg">Cloud backup failed. Download a JSON backup instead.</div>');
+  });
+});
+$('restoreCloudBackupBtn').addEventListener('click',function(){
+  setDataBackupMsg('<div class="toast">Loading latest cloud backup...</div>');
+  fetch(latestCloudBackupBase()).then(function(r){
+    if(!r.ok)throw new Error('Backup not found');
+    return r.json();
+  }).then(function(backup){
+    if(!backup||!backup.state||!Array.isArray(backup.state.teams)||!Array.isArray(backup.state.fixtures))throw new Error('Backup is invalid');
+    if(!window.confirm('Restore the latest cloud backup? This will replace the currently loaded tournament state.')){
+      setDataBackupMsg('<div class="hint">Cloud restore cancelled.</div>');return;
+    }
+    if(!applyState(backup.state))throw new Error('Could not apply backup');
+    redrawScorerUI();
+    saveLocalDraft();
+    publish();
+    setDataBackupMsg('<div class="toast">&#10004; Latest cloud backup restored and published.</div>');
+  }).catch(function(e){
+    setDataBackupMsg('<div class="warnmsg">Could not restore cloud backup: '+e.message+'.</div>');
+  });
+});
 $('importDataBtn').addEventListener('click',function(){
   var f=$('importDataFile');
   if(!f)return;
@@ -3105,7 +3277,7 @@ $('applyCodeBtn').addEventListener('click',function(){
   var v=$('matchCodeInput').value.replace(/[^A-Za-z0-9_-]/g,'').substring(0,40);
   if(!v){$('copyMsg').innerHTML='<div class="warnmsg">Enter a code using letters, numbers, dashes.</div>';return;}
   flushPublishNow();
-  MATCH_CODE=v;refreshShare();
+  MATCH_CODE=v;backendETag=null;syncConflict=false;refreshShare();
   restoreStateFromBackend().then(function(restored){
     if(!restored)publish();
     $('copyMsg').innerHTML='<div class="toast">\u2714 Match code set to <b>'+v+'</b>.'+
@@ -3668,6 +3840,38 @@ function updateLiveWindow(){
 }
 
 /* ================= EXPORT ================= */
+function deliverExportFile(blob,filename,label){
+  var file=null,canShare=false;
+  try{
+    if(typeof File!=='undefined')file=new File([blob],filename,{type:blob.type||'application/octet-stream'});
+    canShare=!!(file&&navigator.share&&navigator.canShare&&navigator.canShare({files:[file]}));
+  }catch(e){canShare=false;}
+  if(canShare){
+    $('exportMsg').innerHTML='<div class="toast">Opening your phone\'s Save / Share menu...</div>';
+    navigator.share({files:[file],title:label,text:'Hackathon 2026 Cricket Tournament '+label})
+      .then(function(){$('exportMsg').innerHTML='<div class="toast">&#10004; '+label+' shared or saved.</div>';})
+      .catch(function(e){
+        if(e&&e.name==='AbortError')$('exportMsg').innerHTML='<div class="hint">Export cancelled.</div>';
+        else fallbackDownloadFile(blob,filename,label);
+      });
+    return;
+  }
+  fallbackDownloadFile(blob,filename,label);
+}
+function fallbackDownloadFile(blob,filename,label){
+  try{
+    var url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=filename;a.rel='noopener';a.style.display='none';
+    document.body.appendChild(a);a.click();
+    setTimeout(function(){
+      if(a.parentNode)a.parentNode.removeChild(a);
+      URL.revokeObjectURL(url);
+    },60000);
+    $('exportMsg').innerHTML='<div class="toast">&#10004; '+label+' download started. Check your Downloads folder.</div>';
+  }catch(e){
+    $('exportMsg').innerHTML='<div class="banner-err">Could not download '+label+': '+e.message+'. Try Chrome, Edge, or Safari outside an in-app browser.</div>';
+  }
+}
 function buildExportSheets(){
   var sheets=[];
   var res=[['Hackathon 2026 Cricket Tournament \u2014 Results'],
@@ -3744,8 +3948,9 @@ function buildExportSheets(){
 $('exportBtn').addEventListener('click',function(){
   if(!fixtures.length){$('exportMsg').innerHTML='<div class="warnmsg">Load teams first.</div>';return;}
   try{
-    MiniXLSX.download(buildExportSheets(),'hackathon2026_cricket_results.xlsx');
-    $('exportMsg').innerHTML='<div class="toast">\u2714 Excel file downloaded.</div>';
+    var bytes=MiniXLSX.bytes(buildExportSheets());
+    var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    deliverExportFile(blob,'hackathon2026_cricket_results.xlsx','Excel results');
   }catch(e){
     $('exportMsg').innerHTML='<div class="banner-err">Export failed: '+e.message+'. Try CSV.</div>';
   }
@@ -3765,19 +3970,15 @@ $('exportCsvBtn').addEventListener('click',function(){
       out.push('');
     });
     var blob=new Blob(['\uFEFF'+out.join('\n')],{type:'text/csv;charset=utf-8;'});
-    var url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download='hackathon2026_cricket_results.csv';
-    document.body.appendChild(a);a.click();
-    setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},400);
-    $('exportMsg').innerHTML='<div class="toast">\u2714 CSV downloaded.</div>';
+    deliverExportFile(blob,'hackathon2026_cricket_results.csv','CSV results');
   }catch(e){
     $('exportMsg').innerHTML='<div class="banner-err">CSV export failed: '+e.message+'</div>';
   }
 });
 
 /* ================= BOOT ================= */
-if(IS_VIEWER){ startViewer(); }
-else {
+function startScorerApp(){
+  $('scorerLock').style.display='none';
   noteReader();
   refreshShare();
   setupViewerAnnouncement();
@@ -3788,6 +3989,27 @@ else {
   window.addEventListener('beforeunload',flushPublishNow);
   restoreStateFromBackend();
 }
+function requestScorerAccess(){
+  var accessKey='cricket_scorer_unlocked_'+MATCH_CODE;
+  try{if(sessionStorage.getItem(accessKey)==='1'){startScorerApp();return;}}catch(e){}
+  var lock=$('scorerLock'),input=$('scorerPinInput'),error=$('scorerPinError'),button=$('unlockScorerBtn');
+  lock.style.display='flex';
+  function unlock(){
+    if(input.value===String(SCORER_PIN)){
+      try{sessionStorage.setItem(accessKey,'1');}catch(e){}
+      input.value='';error.innerHTML='';startScorerApp();
+    }else{
+      input.value='';
+      error.innerHTML='<div class="warnmsg">Incorrect scorer PIN.</div>';
+      input.focus();
+    }
+  }
+  button.addEventListener('click',unlock);
+  input.addEventListener('keydown',function(e){if(e.key==='Enter')unlock();});
+  setTimeout(function(){input.focus();},0);
+}
+if(IS_VIEWER){startViewer();}
+else requestScorerAccess();
 })();
 
 </script>
