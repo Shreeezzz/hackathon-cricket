@@ -2150,13 +2150,35 @@ $('saveNewTeamBtn').addEventListener('click',function(){
   }
 });
 var editingTeam=-1;
+function applyTeamNamesToOpenMatch(m,teamIndex){
+  if(!m||m.over||typeof m.fixture!=='number')return;
+  var f=fixtures[m.fixture],t=teams[teamIndex];
+  if(!f||!t||(f.a!==teamIndex&&f.b!==teamIndex))return;
+  var byId={};
+  t.players.forEach(function(p){byId[p.id]=p.name;});
+  (m.innings||[]).forEach(function(i){
+    if(i.battingName===t.name&&Array.isArray(i.batting))i.batting.forEach(function(p){if(byId[p.id])p.name=byId[p.id];});
+    if(i.bowlingName===t.name&&Array.isArray(i.bowling))i.bowling.forEach(function(p){if(byId[p.id])p.name=byId[p.id];});
+  });
+}
+function applyTeamNamesToOpenMatches(teamIndex){
+  applyTeamNamesToOpenMatch(match,teamIndex);
+  var stored=matchesByFixture||{};
+  for(var k in stored)applyTeamNamesToOpenMatch(stored[k],teamIndex);
+  if(so&&!so.done&&fixtures[so.fixture]){
+    var f=fixtures[so.fixture],t=teams[teamIndex],byId={};
+    if(t&&(f.a===teamIndex||f.b===teamIndex)){
+      t.players.forEach(function(p){byId[p.id]=p.name;});
+      (so.innings||[]).forEach(function(i){
+        if(i.battingName===t.name&&Array.isArray(i.batting))i.batting.forEach(function(p){if(byId[p.id])p.name=byId[p.id];});
+        if(i.bowlingName===t.name&&Array.isArray(i.bowling))i.bowling.forEach(function(p){if(byId[p.id])p.name=byId[p.id];});
+      });
+    }
+  }
+}
 function openEditTeam(i){
   var t=teams[i];
   if(!t)return;
-  if(fixtures.some(function(f){return f.played;})||match){
-    $('editTeamWarn').innerHTML='<div class="warnmsg">Team members cannot be edited after a match has started.</div>';
-    return;
-  }
   editingTeam=i;
   $('editTeamRows').innerHTML='<table><tr><th>Player name</th><th>Role</th><th>Captain</th></tr>'+t.players.map(function(p){
     return '<tr><td><input type="text" data-team-field="name" data-id="'+p.id+'" value="'+p.name.replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'"></td>'+ 
@@ -2185,8 +2207,9 @@ $('saveTeamBtn').addEventListener('click',function(){
     if(input.dataset.teamField==='role')p.role=input.value.trim();
   });
   t.players.forEach(function(p){p.captain=p.id===captainId;});
+  applyTeamNamesToOpenMatches(editingTeam);
   $('editTeamCard').style.display='none';editingTeam=-1;
-  renderTeams();publish();
+  renderTeams();render();publish();
 });
 $('cancelTeamBtn').addEventListener('click',function(){
   $('editTeamCard').style.display='none';editingTeam=-1;
