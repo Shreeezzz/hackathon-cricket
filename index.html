@@ -1446,6 +1446,7 @@ function setupViewerAnnouncement(){
     try{localStorage.setItem('cricketViewerAnnouncement',text);}catch(e){}
     viewerAnnouncement=text;
     renderViewerAnnouncement(text);
+    flushPublishNow();
     publish();
   });
   $('clearAnnouncementBtn').addEventListener('click',function(){
@@ -1453,6 +1454,7 @@ function setupViewerAnnouncement(){
     try{localStorage.removeItem('cricketViewerAnnouncement');}catch(e){}
     viewerAnnouncement='';
     renderViewerAnnouncement('');
+    flushPublishNow();
     publish();
   });
   var tbtn=$('toggleViewerLiveBtn');
@@ -1461,6 +1463,7 @@ function setupViewerAnnouncement(){
     tbtn.addEventListener('click',function(){
       viewerLiveEnabled=!viewerLiveEnabled;
       renderViewerLiveToggle();
+      flushPublishNow();
       publish();
     });
   }
@@ -1494,8 +1497,18 @@ function startViewer(){
     $('vTeams').innerHTML=noSyncMsg;
     return;
   }
-  vRender();
-  connectStream();
+  setSync('local','Loading initial data...');
+  fetch(dbBase()).then(function(r){return r.json();})
+    .then(function(d){
+      vData=d;
+      vRender();
+      setSync('on','Live \u2014 connected');
+      connectStream();
+    })
+    .catch(function(e){
+      setSync('off','Could not load initial data');
+      connectStream();
+    });
 }
 function vSwitch(){
   $('vTabOverwise').className='vtab'+(vTab==='overwise'?' active':'');
@@ -1543,12 +1556,12 @@ function applyPatch(base,path,data){
   return base;
 }
 function pollFallback(){
-  setSync('on','Live \u2014 refreshing every few seconds');
+  setSync('on','Live \u2014 refreshing every second');
   setInterval(function(){
     fetch(dbBase()).then(function(r){return r.json();})
       .then(function(d){vData=d;vRender();setSync('on','Live \u2014 refreshing');})
       .catch(function(){setSync('off','Offline \u2014 retrying');});
-  },4000);
+  },1000);
 }
 var VROUND=['Elimination Round','Quarter Finals','Semi Finals','Final'];
 function vRoundName(r){return VROUND[r]||('Round '+(r+1));}
@@ -2081,7 +2094,10 @@ function afterLoad(){
   $('loadStatus').innerHTML='<p class="hint"><span class="pill">'+teams.length+' teams</span> '+
     '<span class="pill">'+tp+' players</span> <span class="pill">'+fixtures.length+' first-round matches</span></p>'+
     (w.length?'<div class="warnmsg">&#9888; '+w.join(' &middot; ')+' &mdash; the app will still run.</div>':'');
-  checkRules();publish();
+  checkRules();
+  saveLocalDraft();
+  flushPublishNow();
+  publish();
 }
 function renderTeams(){
   $('teamsGrid').innerHTML=teams.map(function(t){
@@ -2499,7 +2515,7 @@ function startMatch(side){
   undoStack=[];
   $('tossCard').style.display='none';$('matchArea').style.display='block';
   $('breakCard').style.display='none';$('confirmCard').style.display='none';
-  showOpeners();render();
+  showOpeners();render();syncCurrentMatch();flushPublishNow();
 }
 function inn(){
   var i=match.innings[match.current];
@@ -2585,7 +2601,7 @@ $('confirmOpenersBtn').addEventListener('click',function(){
   }
   i.rotIdx=0;i.striker=s;i.nonStriker=ns;i.bowler=b;i.started=true;
   i.batting.forEach(function(x){if(x.id===s||x.id===ns)x.batted=true;});
-  hidePrompts();$('scoringCard').style.display='block';render();
+  hidePrompts();$('scoringCard').style.display='block';render();syncCurrentMatch();flushPublishNow();
 });
 function openBowlerPanel(manual){
   var i=inn(),avail=eligibleBowlers();
@@ -2666,7 +2682,7 @@ $('confirmChangeBatterBtn').addEventListener('click',function(){
   i.batting.forEach(function(x){
     if(x.id===s||x.id===ns){x.batted=true;x.retiredNO=false;}
   });
-  hidePrompts();$('scoringCard').style.display='block';render();
+  hidePrompts();$('scoringCard').style.display='block';render();syncCurrentMatch();flushPublishNow();
   showMsg('Batsmen updated on crease.');
 });
 $('cancelChangeBatterBtn').addEventListener('click',function(){
@@ -2789,7 +2805,7 @@ function scoreRuns(r){
   if(r===4)s.fours++; if(r===6)s.sixes++;
   pushEvent(String(r),r===4?'four':r===6?'six':r===0?'dot':'');
   if(r%2===1){var t=i.striker;i.striker=i.nonStriker;i.nonStriker=t;}
-  afterLegalBall();render();
+  afterLegalBall();render();syncCurrentMatch();flushPublishNow();
 }
 function scoreTwoD(){
   var i=inn(); if(i.done||!i.started)return;
@@ -2798,7 +2814,7 @@ function scoreTwoD(){
   snapshot();
   i.runs+=2;bo.runs+=2;s.runs+=2;s.twoD++;s.balls++;bo.balls++;i.balls++;
   pushEvent('2D','td');
-  afterLegalBall();render();
+  afterLegalBall();render();syncCurrentMatch();flushPublishNow();
 }
 function scoreWide(){
   var i=inn(); if(i.done||!i.started)return;
@@ -2810,13 +2826,13 @@ function scoreWide(){
     pushEvent('WD*','ex');showMsg('Second consecutive wide \u2014 the pair counts as 1 run.');
   } else { pushEvent('WD','ex');
     showMsg('Wide called. A run is added only if the next delivery is also a wide.'); }
-  render();
+  render();syncCurrentMatch();flushPublishNow();
 }
 function scoreNoBall(){
   var i=inn(); if(i.done||!i.started)return;
   var bo=bwl(i.bowler); if(!bo){showMsg('Set the bowler before scoring.','warn');return;}
   snapshot();
-  i.wideStreak=0;i.freeHit=true;pushEvent('NB','ex');render();
+  i.wideStreak=0;i.freeHit=true;pushEvent('NB','ex');render();syncCurrentMatch();flushPublishNow();
   showMsg('No ball called. Next legal delivery is a Free Hit.');
 }
 function scoreBye(){
@@ -2826,7 +2842,7 @@ function scoreBye(){
   snapshot();
   i.runs++;i.extras.bye++;s.balls++;bo.balls++;i.balls++;pushEvent('1b','ex');
   var t=i.striker;i.striker=i.nonStriker;i.nonStriker=t;
-  afterLegalBall();render();
+  afterLegalBall();render();syncCurrentMatch();flushPublishNow();
 }
 function openWicketPanel(){
   var i=inn();
@@ -2898,7 +2914,7 @@ $('confirmWicketBtn').addEventListener('click',function(){
   i.fow.push(i.runs+'-'+i.wickets+' ('+outName+', '+oversStr(i.balls)+')');
   pushEvent('W','w');
   if(outId===i.nonStriker)i.nonStriker=null;
-  i.wideStreak=0;i.freeHit=false;hidePrompts();render();
+  i.wideStreak=0;i.freeHit=false;hidePrompts();render();syncCurrentMatch();flushPublishNow();
   if(checkInningsEnd())return;
   var next=i.batting.filter(function(b){return !b.out&&!b.batted;});
   if(next.length){
@@ -2920,7 +2936,7 @@ $('confirmBatterBtn').addEventListener('click',function(){
       else{var nid=autoNextBowler();if(nid!=null)i.bowler=nid;else openBowlerPanel(false);}
     }
   }
-  render();
+  render();syncCurrentMatch();flushPublishNow();
 });
 function endInnings(){
   if(!match)return;
@@ -2932,11 +2948,11 @@ function endInnings(){
     match.current=1;
     $('breakText').textContent=i.battingName+' scored '+i.runs+'/'+i.wickets+' in '+oversStr(i.balls)+
       ' overs. '+match.innings[1].battingName+' need '+(i.runs+1)+' to win.';
-    $('breakCard').style.display='block';render();
+    $('breakCard').style.display='block';render();syncCurrentMatch();flushPublishNow();
   } else finishMatch();
 }
 $('breakOkBtn').addEventListener('click',function(){
-  $('breakCard').style.display='none';showOpeners();render();
+  $('breakCard').style.display='none';showOpeners();render();syncCurrentMatch();flushPublishNow();
 });
 function computeMOM(i1,i2){
   var players={};
@@ -2990,7 +3006,7 @@ function finishMatch(){
   }
   renderScorecard();renderFixtures();renderResults();
   $('lastCard').style.display='block';goTo('results');
-  updateLiveWindow();publish();
+  updateLiveWindow();syncCurrentMatch();flushPublishNow();publish();
 }
 function snap(i){
   return {battingName:i.battingName,bowlingName:i.bowlingName,runs:i.runs,wickets:i.wickets,
@@ -3366,7 +3382,10 @@ function render(){
         (b.runs/(b.balls/6)).toFixed(2)+'</td><td class="num">'+b.oversDone+'/'+maxSpell+'</td></tr>';}).join('')
       ||'<tr><td colspan="6" class="empty">No balls bowled yet</td></tr>')+'</table>'+fieldingHTML(i);
   renderGenericLiveScores();
-  updateLiveWindow();publish();
+  updateLiveWindow();
+  syncCurrentMatch();
+  flushPublishNow();
+  publish();
 }
 function genericPlayerLabel(teamName,id){
   var t=teams.filter(function(x){return x.name===teamName;})[0];
@@ -4032,7 +4051,7 @@ function requestScorerAccess(){
   setTimeout(function(){input.focus();},0);
 }
 if(IS_VIEWER){startViewer();}
-else requestScorerAccess();
+else startScorerApp();
 })();
 
 </script>
