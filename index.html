@@ -1367,10 +1367,19 @@ function restoreStateFromBackend(){
         if(!chosen)chosen=localState;
         else if(!chosen.teams.length&&localState.teams&&localState.teams.length)chosen=localState;
         else {
-          var backendRichness=stateRichness(chosen),localRichness=stateRichness(localState);
-          if(localRichness>backendRichness+100)chosen=localState;
-          else if(backendRichness>localRichness+100)chosen=backendState;
-          else if(Number(localState.savedAt)>Number(chosen.savedAt))chosen=localState;
+          // Prioritize local data if it's newer (within last 2 minutes)
+          var localTime=Number(localState.savedAt)||0;
+          var backendTime=Number(chosen.savedAt)||0;
+          var timeDiff=localTime-backendTime;
+          if(timeDiff>-5000){
+            // If local is newer or within 5 seconds of backend, use local
+            chosen=localState;
+          } else {
+            var backendRichness=stateRichness(chosen),localRichness=stateRichness(localState);
+            if(localRichness>backendRichness+100)chosen=localState;
+            else if(backendRichness>localRichness+100)chosen=backendState;
+            else if(Number(localState.savedAt)>Number(chosen.savedAt))chosen=localState;
+          }
         }
       }
       var restored=chosen?applyState(chosen):false;
